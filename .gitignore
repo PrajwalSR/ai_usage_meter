@@ -1,0 +1,41 @@
+# Build output
+build/
+.build/
+.swiftpm/
+*.xcodeproj/
+DerivedData/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Editors and local tooling
+.vscode/
+.idea/
+.claude/
+
+# Never commit credentials
+auth.json
+*credentials*.json
+.env
+.env.*
+*.pem
+*.p12
+*.key
+*.mobileprovision
+
+# Never commit local databases or caches
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+Cache.db*
+
+# Never commit real usage data or AI session logs
+*.jsonl
+claude.json
+claude-live.json
+last-invoked.json
