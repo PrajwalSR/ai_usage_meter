@@ -85,8 +85,9 @@ final class UsageStore {
         try? FileManager.default.createDirectory(at: ClaudeReadings.directory,
                                                  withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
-        watcher = FileWatcher(paths: [ClaudeParser.root.path,
-                                      CodexParser.root.path,
+        // Claude Code's logs are deliberately not watched: the app doesn't count
+        // tokens, so it never reads your conversations.
+        watcher = FileWatcher(paths: [CodexParser.root.path,
                                       ClaudeReadings.directory.path]) { [weak self] in
             Task { @MainActor in self?.refresh() }
         }
@@ -152,6 +153,9 @@ final class UsageStore {
                 case .success(let json):
                     self.webSignInNeeded = false
                     self.webError = ClaudeWebSource.store(rawJSON: json)
+                    // A good claude.ai reading makes any backup-check complaint
+                    // irrelevant (e.g. "Claude login expired").
+                    if self.webError == nil { self.liveClaudeError = nil }
                     ClaudeWebSession.shared.closeLoginWindow()
                     self.refresh()
                 case .failure(let failure):
@@ -216,8 +220,22 @@ final class UsageStore {
         maybeFetchLive()
     }
 
+    /// True when claude.ai gave us a reading recently enough that the backup
+    /// check has nothing to add.
+    private var webReadingIsFresh: Bool {
+        guard let web = ClaudeReadings.load().filter({ $0.source == .claudeWeb })
+            .max(by: { $0.recordedAt < $1.recordedAt }) else { return false }
+        return Date().timeIntervalSince(web.recordedAt) <= ClaudeReadings.liveFreshness
+    }
+
     private func fetchLiveClaude() {
         guard liveClaudeEnabled, !livePausedByDecline, !liveFetchInFlight else { return }
+        // claude.ai is already answering: don't spend a rate-limited request, and
+        // don't report its problems -- they'd be noise next to a good number.
+        if webReadingIsFresh {
+            liveClaudeError = nil
+            return
+        }
         // Still inside a rate-limit wait: skip this round rather than be refused.
         if let liveRetryAfter, liveRetryAfter > Date() { return }
         lastLiveAttempt = Date()

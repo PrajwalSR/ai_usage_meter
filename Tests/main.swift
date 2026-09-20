@@ -97,9 +97,7 @@ func window(_ pct: Double, minutes: Int, resetsIn: TimeInterval, limitId: String
 }
 
 func providerReading(_ provider: Provider, _ reading: AllowanceReading?) -> ProviderReading {
-    ProviderReading(provider: provider, readings: reading.map { [$0] } ?? [], unavailableNote: "n/a",
-                    last5Hours: TokenTotals(), last7Days: TokenTotals(),
-                    filesSeen: 0, filesReadThisPass: 0, newestLogEntry: nil)
+    ProviderReading(provider: provider, readings: reading.map { [$0] } ?? [], unavailableNote: "n/a")
 }
 
 test("Expiry: a reading whose windows have all reset shows as unknown, never 0%") {
@@ -168,21 +166,17 @@ test("Codex: window length comes from window_minutes, not from primary/secondary
     check(reading?.windows.first?.windowLabel == "1-week", "primary should be labeled 1-week")
 }
 
-test("Codex: a log file yields tokens (cached split out) and a reading") {
+test("Codex: a log file yields its limit reading, and nothing else is read") {
     let lines = [
-        #"{"timestamp":"2027-01-15T08:00:00.000Z","type":"token_usage_record","payload":{"usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50}}}"#,
+        #"{"timestamp":"2027-01-15T08:00:00.000Z","type":"token_usage_record","payload":{"usage":{"input_tokens":1000,"output_tokens":50}}}"#,
         #"{"timestamp":"2027-01-15T08:00:01.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":12.5,"window_minutes":10080,"resets_at":1800000000}}}}"#,
         #"{"timestamp":"2027-01-15T08:00:02.000Z","type":"response_item","payload":{"text":"unrelated"}}"#,
     ].joined(separator: "\n") + "\n"
     let url = writeFile("codex.jsonl", Data(lines.utf8))
-    var tokens: [TokenTotals] = []
     var readings: [AllowanceReading] = []
-    _ = try CodexParser.parse(url: url, from: 0,
-                              onUsage: { _, t in tokens.append(t) },
-                              onReading: { readings.append($0) })
-    check(tokens.count == 1 && tokens[0].input == 600 && tokens[0].cacheRead == 400,
-          "cached input must not be double counted: \(tokens)")
-    check(readings.count == 1 && readings[0].windows.first?.usedPercent == 12.5, "reading not parsed")
+    _ = try CodexParser.parse(url: url, from: 0) { readings.append($0) }
+    check(readings.count == 1, "expected exactly one reading, got \(readings.count)")
+    check(readings.first?.windows.first?.usedPercent == 12.5, "reading not parsed")
 }
 
 // MARK: - Claude sources
@@ -228,28 +222,31 @@ test("Claude: files from older builds (recorded_at + source marker) still load")
 
 // MARK: - Database
 
-test("Database: a rolled-back pass leaves no tokens and no offsets behind") {
+test("Database: a rolled-back pass leaves no readings and no offsets behind") {
     let db = try Database(url: tmp.appendingPathComponent("rollback.sqlite"))
     try db.begin()
-    try db.addUsage(provider: "codex", bucket: 1_800_000_000, TokenTotals(input: 10, messages: 1))
+    try db.addReading(provider: "codex", AllowanceReading(
+        recordedAt: now, source: .codexLog, planType: nil,
+        windows: [window(10, minutes: 10080, resetsIn: 600, limitId: "codex")]))
     try db.setFileState(provider: "codex", path: "/fake.jsonl", inode: 1, offset: 99, mtime: now)
     db.rollback()
-    let tokens = try db.totals(provider: "codex", since: .distantPast)
+    let readings = try db.latestReadings(provider: "codex")
     let offsets = try db.fileStates(provider: "codex")
-    check(tokens.messages == 0, "tokens survived rollback")
+    check(readings.isEmpty, "reading survived rollback")
     check(offsets.isEmpty, "offset survived rollback")
 }
 
 test("Database: a file's savepoint rollback undoes only that file") {
     let db = try Database(url: tmp.appendingPathComponent("savepoint.sqlite"))
     try db.begin()
-    try db.addUsage(provider: "claude", bucket: 1_800_000_000, TokenTotals(input: 1, messages: 1))
+    try db.setFileState(provider: "codex", path: "/first.jsonl", inode: 1, offset: 10, mtime: now)
     try db.savepoint("file")
-    try db.addUsage(provider: "claude", bucket: 1_800_000_300, TokenTotals(input: 5, messages: 1))
+    try db.setFileState(provider: "codex", path: "/second.jsonl", inode: 2, offset: 20, mtime: now)
     db.rollback(to: "file")
     try db.commit()
-    let kept = try db.totals(provider: "claude", since: .distantPast)
-    check(kept.messages == 1, "partial file writes should be undone, earlier writes kept")
+    let kept = try db.fileStates(provider: "codex")
+    check(kept.count == 1 && kept["/first.jsonl"] != nil,
+          "partial file writes should be undone, earlier writes kept: \(kept.keys.sorted())")
 }
 
 test("Database: write errors are thrown, not ignored") {
@@ -291,9 +288,7 @@ test("Codex: a newer reading for one limit doesn't hide another still-valid limi
     check(Set(ids) == Set(["codex", "other-limit"]), "lost a still-valid limit: \(ids)")
 
     // …and the display shows both, headline = closest to its limit.
-    let r = ProviderReading(provider: .codex, readings: latest, unavailableNote: "",
-                            last5Hours: TokenTotals(), last7Days: TokenTotals(),
-                            filesSeen: 0, filesReadThisPass: 0, newestLogEntry: nil)
+    let r = ProviderReading(provider: .codex, readings: latest, unavailableNote: "")
     guard case .available(let head, let others, _) = r.display(now: now) else {
         return check(false, "expected .available")
     }
@@ -342,11 +337,11 @@ test("Database: schema upgrade is all-or-nothing and the version is in the file 
     _ = try Database(url: url)                  // creates current schema
     let reopened = try Database(url: url)       // reopening must not drop data
     try reopened.begin()
-    try reopened.addUsage(provider: "codex", bucket: 1_800_000_000, TokenTotals(messages: 1))
+    try reopened.setFileState(provider: "codex", path: "/x.jsonl", inode: 1, offset: 5, mtime: now)
     try reopened.commit()
     let again = try Database(url: url)
-    let kept = try again.totals(provider: "codex", since: .distantPast)
-    check(kept.messages == 1, "reopening a current cache lost data")
+    let kept = try again.fileStates(provider: "codex")
+    check(kept.count == 1, "reopening a current cache lost data")
 }
 
 test("Database: a pass refuses to write if another build changed the schema") {

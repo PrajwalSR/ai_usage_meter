@@ -18,14 +18,12 @@ flowchart LR
 flowchart LR
     subgraph Sources
         CX["Codex logs<br/>~/.codex/sessions"]
-        CL["Claude Code logs<br/>~/.claude/projects"]
         WEB["claude.ai<br/>(signed-in web view)"]
         AN["Anthropic<br/>/api/oauth/usage"]
         SL["Claude Code status line<br/>scripts/claude-statusline.py"]
     end
 
-    CX -->|"Codex limit + tokens"| IDX["UsageIndex"]
-    CL -->|"Claude Code tokens"| IDX
+    CX -->|"Codex limit"| IDX["UsageIndex"]
     WEB -->|"ClaudeWebSource"| F0["statusline/claude-web.json"]
     AN -->|"ClaudeLiveUsage"| F1["statusline/claude-live.json"]
     SL --> F2["statusline/claude.json"]
@@ -90,8 +88,7 @@ to `?` without waiting for new data.
 | `UsageIndex.swift` | One index pass: ingest (transaction) → build `UsageReport` |
 | `Database.swift` | SQLite wrapper and schema. All writes throw on failure |
 | `LogParser.swift` | Protocol shared by the log parsers |
-| `CodexParser.swift` | Codex logs → token counts + limit readings (all windows, with `limit_id`) |
-| `ClaudeParser.swift` | Claude Code logs → token counts |
+| `CodexParser.swift` | Codex logs → limit readings (all windows, with `limit_id`) |
 | `ClaudeReadings.swift` | Loads the three Claude reading files; decides which one to show |
 | `ClaudeWebSession.swift` | The app's own browser: sign-in window, and usage calls made *inside* the signed-in claude.ai page |
 | `ClaudeWebSource.swift` | Turns claude.ai's reply into `claude-web.json` |
@@ -234,22 +231,22 @@ two passes can't both read the same bytes.
 | Table | Key | Holds |
 |---|---|---|
 | `files` | `path` | `provider`, `inode`, `offset` (bytes read), `mtime` |
-| `buckets` | `(provider, bucket)` | Token sums per 5-minute bucket |
 | `readings` | `(provider, source, limit_key, recorded_at)` | Plan and the windows for that limit, as JSON |
 
-Pruning: buckets older than 7 days; readings older than 30 days.
+Pruning: readings older than 30 days. There is no token table: the app counts
+nothing, which is also why Claude Code's logs are never read.
 
 ### One index pass
 
 ```mermaid
 flowchart TB
-    B["BEGIN"] --> F["For each provider's log files<br/>changed in the last 7 days"]
+    B["BEGIN"] --> F["For each Codex log file<br/>changed in the last 7 days"]
     F --> RP{"Any file replaced<br/>or shortened?"}
-    RP -->|yes| RS["Clear that provider's<br/>tokens + offsets"]
+    RP -->|yes| RS["Forget that provider's<br/>file offsets"]
     RP -->|no| EF
     RS --> EF["For each file with new bytes"]
     EF --> SP["SAVEPOINT file"]
-    SP --> PR["Parse new lines → add tokens,<br/>readings, new offset"]
+    SP --> PR["Parse new lines → add<br/>readings, new offset"]
     PR -->|ok| RL["RELEASE"]
     PR -->|"file error"| RB["ROLLBACK TO file<br/>(skip, retry next pass)"]
     PR -->|"database error"| RA["ROLLBACK whole pass<br/>show error"]
@@ -259,12 +256,12 @@ flowchart TB
 ```
 
 Why each piece exists:
-- **Savepoint per file:** a read error halfway through a file must not leave half
-  its tokens counted while the offset stays old. The retry would count them twice.
-- **Rollback on any database error:** token totals and offsets must never
-  disagree.
-- **Replaced or shortened file:** its old tokens are already inside the buckets and
-  can't be subtracted, so that provider's totals are rebuilt from its logs.
+- **Savepoint per file:** a read error halfway through a file must not leave its
+  readings saved with an offset that says the file was fully read.
+- **Rollback on any database error:** readings and offsets must never disagree.
+- **Replaced or shortened file:** the stored offsets are meaningless, so that
+  provider's logs are read again. Readings already saved are keyed by when they
+  were taken, so re-reading can only re-add the same rows.
 
 ### Line reading details (`LineReader`)
 

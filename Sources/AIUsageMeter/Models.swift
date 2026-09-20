@@ -66,28 +66,6 @@ struct AllowanceReading: Sendable, Equatable {
     }
 }
 
-// MARK: - Tokens
-
-/// Tokens counted from local logs. How much was used -- never how much allowance
-/// is left.
-struct TokenTotals: Sendable, Equatable {
-    var input = 0
-    var output = 0
-    var cacheRead = 0
-    var cacheWrite = 0
-    var messages = 0
-
-    var total: Int { input + output + cacheRead + cacheWrite }
-
-    static func + (a: TokenTotals, b: TokenTotals) -> TokenTotals {
-        TokenTotals(input: a.input + b.input,
-                    output: a.output + b.output,
-                    cacheRead: a.cacheRead + b.cacheRead,
-                    cacheWrite: a.cacheWrite + b.cacheWrite,
-                    messages: a.messages + b.messages)
-    }
-}
-
 // MARK: - Provider state
 
 enum Provider: String, Sendable, Equatable {
@@ -135,12 +113,10 @@ struct ProviderReading: Sendable, Equatable {
     var readings: [AllowanceReading]
     /// Why there is no reading, shown when `readings` is empty.
     var unavailableNote: String
-    var last5Hours: TokenTotals
-    var last7Days: TokenTotals
-    var filesSeen: Int
-    /// Files that had new bytes this pass. Zero means everything was indexed.
-    var filesReadThisPass: Int
-    var newestLogEntry: Date?
+    /// Log files seen for this provider, and how many had new bytes this pass.
+    /// Zero read means everything was already indexed.
+    var filesSeen: Int = 0
+    var filesReadThisPass: Int = 0
 
     var providerName: String { provider.displayName }
 
