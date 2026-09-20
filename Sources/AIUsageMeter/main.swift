@@ -44,9 +44,10 @@ if CommandLine.arguments.contains("--scan") {
             case .unavailable:
                 print("  usage unavailable: \(r.unavailableNote)")
             }
-            print("  tokens:  5h \(Fmt.tokens(r.last5Hours.total)) / \(r.last5Hours.messages) msg, "
-                  + "7d \(Fmt.tokens(r.last7Days.total)) / \(r.last7Days.messages) msg")
-            print("  files:   \(r.filesSeen) seen, \(r.filesReadThisPass) read this pass\n")
+            if r.filesSeen > 0 {
+                print("  files:   \(r.filesSeen) seen, \(r.filesReadThisPass) read this pass")
+            }
+            print("")
         }
         for e in report.errors { print("! \(e)") }
     } catch {

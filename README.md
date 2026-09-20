@@ -41,8 +41,11 @@ The logos and text turn white in dark mode and black in light mode.
 *(Screenshots use made-up numbers. Regenerate them with
 `./scripts/render-screenshots.sh`.)*
 
-Every number shows **where it came from** and **how old it is**, like "Checked
-with Anthropic · 1m ago" or "From Codex logs · recorded 50m ago".
+Every number shows **where it came from** and **how old it is**, like "From
+claude.ai · 30s ago" or "From Codex logs · recorded 50m ago".
+
+The app shows limits only. It does **not** count tokens, and it never reads your
+Claude Code conversations.
 
 ---
 
@@ -182,7 +185,7 @@ flowchart TB
 | Does it see my password? | No. You type it on Anthropic's own sign-in page, inside a window the app shows but doesn't read. |
 | Where does my claude.ai session live? | In the app's own browser storage, like any browser. **The app never reads or copies it**: it asks for usage *from inside* the signed-in page, so the page attaches its own cookie. Other apps of this kind lift the cookie out of Safari's or Chrome's cookie database; this one doesn't. |
 | Does it contact the internet? | Only claude.ai (about once a minute, for usage) and api.anthropic.com (backup check). Nothing else, ever. |
-| Does it read my chats? | The log files it reads contain your conversations. It picks out only the usage numbers and saves only those. Your messages are never saved or sent. |
+| Does it read my chats? | **It never opens Claude Code's logs.** It reads Codex's logs, which do hold your Codex conversations, but only looks at lines carrying the limit numbers and saves only those. |
 | Does it track me? | No. No analytics, no tracking, no crash reports. |
 | Does it need my OpenAI login? | No. ChatGPT numbers come from Codex's files on your Mac. |
 | How do I sign out? | Open the sign-in window and sign out there, or delete `~/Library/Application Support/AIUsageMeter/`. |
@@ -201,14 +204,19 @@ chatgpt.com have their own limits, which aren't shown here.
 Codex only writes to its files while it runs. The panel always shows how old the
 number is.
 
-**The Claude number includes everything.**
-claude.ai, the Claude desktop app and Claude Code share one limit, so the percentage
-covers all of them.
+**The Claude number covers every device.**
+claude.ai, the phone app, the desktop app and Claude Code share one limit, and the
+app asks your account directly. Use Claude on your phone and this Mac shows it
+within a minute.
 
-**Token counts are not your limit.**
-The "tokens on this Mac" rows only count Claude Code and Codex use on this Mac. The
-app never works out a percentage from tokens. If it has no real number, it says
-"unavailable" instead of guessing.
+**The ChatGPT number only updates when Codex runs on this Mac.**
+That limit is account-wide too, but the app learns it from Codex's log files here.
+Use Codex on another machine and this Mac won't know until Codex next runs on it.
+The card always shows how old the number is.
+
+**It never guesses.**
+The app shows only percentages Claude or OpenAI reported. It doesn't count tokens
+or work a percentage out for itself. With no real number, it says "unavailable".
 
 **Claude's numbers come from claude.ai's own usage address.**
 It isn't a published API, so it could change one day. If it does, the app falls

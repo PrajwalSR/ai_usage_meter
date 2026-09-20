@@ -1,20 +1,21 @@
 import Foundation
 
-/// Turns log files and reading files into a `UsageReport`.
+/// Turns Codex's log files and the Claude reading files into a `UsageReport`.
 ///
 /// Each pass has two steps:
-/// 1. **Ingest** (one transaction): read only bytes appended since the last pass,
-///    add token counts to 5-minute buckets, store allowance readings, save new
-///    file offsets. If any write fails the transaction is rolled back, so token
-///    totals and offsets can never disagree. The next pass retries.
-/// 2. **Build**: read totals and readings back and assemble the report.
+/// 1. **Ingest** (one transaction): read only bytes appended to Codex's logs
+///    since last time, store any limit readings, save the new file offsets. Load
+///    the Claude reading files. If any write fails the transaction is rolled
+///    back, and the next pass retries.
+/// 2. **Build**: read the stored readings back and assemble the report.
+///
+/// The app does not count tokens, so Claude Code's logs are never read.
 ///
 /// Owned by one background task; not thread-safe.
 final class UsageIndex {
     private let db: Database
-    /// How far back token totals go, and how old a log file may be to be read.
+    /// How old a log file may be and still be worth reading.
     static let retention: TimeInterval = 7 * 86400
-    private static let bucketSeconds: Int64 = 300
 
     init(url: URL = Database.defaultURL) throws {
         db = try Database(url: url)
@@ -23,33 +24,25 @@ final class UsageIndex {
     func refresh(now: Date = Date()) -> UsageReport {
         let t0 = Date()
         var errors: [String] = []
-        var readCounts: [Provider: Int] = [:]
-        var seenCounts: [Provider: Int] = [:]
+        var seen = 0, read = 0
 
         do {
             try db.begin()
-            for parser in [CodexParser.self, ClaudeParser.self] as [LogParser.Type] {
-                let (seen, read) = try ingest(parser, now: now, errors: &errors)
-                seenCounts[parser.provider] = seen
-                readCounts[parser.provider] = read
-            }
+            (seen, read) = try ingest(CodexParser.self, now: now, errors: &errors)
             for reading in ClaudeReadings.load() {
                 try db.addReading(provider: Provider.claude.rawValue, reading)
             }
-            try db.pruneBuckets(before: now.addingTimeInterval(-Self.retention))
             try db.pruneReadings(before: now.addingTimeInterval(-30 * 86400))
             try db.commit()
         } catch {
             db.rollback()
             errors.append("Couldn't update the local cache (\(error)). Nothing was saved; "
                           + "it will retry on the next update.")
-            readCounts = [:]
+            read = 0
         }
 
-        let codex = build(.codex, now: now, seen: seenCounts[.codex] ?? 0,
-                          read: readCounts[.codex] ?? 0, errors: &errors)
-        let claude = build(.claude, now: now, seen: seenCounts[.claude] ?? 0,
-                           read: readCounts[.claude] ?? 0, errors: &errors)
+        let codex = build(.codex, now: now, seen: seen, read: read, errors: &errors)
+        let claude = build(.claude, now: now, seen: 0, read: 0, errors: &errors)
         return UsageReport(claude: claude, codex: codex, scannedAt: now,
                            scanDuration: Date().timeIntervalSince(t0), errors: errors)
     }
@@ -60,24 +53,22 @@ final class UsageIndex {
     private func ingest(_ parser: LogParser.Type, now: Date,
                         errors: inout [String]) throws -> (Int, Int) {
         let key = parser.provider.rawValue
-        let cutoff = now.addingTimeInterval(-Self.retention)
         var known = try db.fileStates(provider: key)
+        let files = recentJSONLFiles(root: parser.root,
+                                     modifiedAfter: now.addingTimeInterval(-Self.retention))
 
-        // A file untouched since the cutoff can't hold entries inside the window.
-        let files = recentJSONLFiles(root: parser.root, modifiedAfter: cutoff)
-
-        // Replaced or truncated logs: that file's earlier tokens are already in
-        // the buckets and can't be subtracted, so rebuild this provider's totals.
-        // Checked up front so the rebuild happens once, before any reading.
+        // A replaced or shortened log means the stored offsets are meaningless.
+        // Readings already saved stay: each is a point-in-time record, keyed by
+        // when it was taken, so re-reading a file can only re-add the same rows.
         let replaced = files.contains { url in
             guard let prior = known[url.path], let attrs = fileAttributes(url) else { return false }
             return prior.inode != attrs.inode || attrs.size < prior.offset
         }
         if replaced {
-            try db.resetTokens(provider: key)
+            try db.resetFileOffsets(provider: key)
             known = [:]
             errors.append("\(parser.provider.displayName): a log file was replaced or "
-                          + "shortened, so token totals were rebuilt.")
+                          + "shortened, so its logs were read again.")
         }
 
         var readCount = 0
@@ -86,18 +77,12 @@ final class UsageIndex {
             let start = known[url.path]?.offset ?? 0
             if known[url.path] != nil, start == attrs.size { continue }  // nothing new
 
-            // A file's tokens and its new offset are saved together or not at
-            // all: a read error halfway through must not leave half its tokens
-            // counted with the old offset, or the retry would count them twice.
+            // Readings and the new offset are saved together or not at all.
             try db.savepoint("file")
             do {
-                let newOffset = try parser.parse(url: url, from: start, onUsage: { ts, totals in
-                    guard ts >= cutoff else { return }
-                    let bucket = (Int64(ts.timeIntervalSince1970) / Self.bucketSeconds) * Self.bucketSeconds
-                    try self.db.addUsage(provider: key, bucket: bucket, totals)
-                }, onReading: { reading in
+                let newOffset = try parser.parse(url: url, from: start) { reading in
                     try self.db.addReading(provider: key, reading)
-                })
+                }
                 try db.setFileState(provider: key, path: url.path, inode: attrs.inode,
                                     offset: newOffset, mtime: attrs.mtime)
                 try db.release("file")
@@ -124,26 +109,20 @@ final class UsageIndex {
 
     private func build(_ provider: Provider, now: Date, seen: Int, read: Int,
                        errors: inout [String]) -> ProviderReading {
-        let key = provider.rawValue
         do {
             return ProviderReading(
                 provider: provider,
                 // Every newest-per-source-and-limit reading. Which to show is
                 // decided at display time, when expiry is known.
-                readings: try db.latestReadings(provider: key),
-                unavailableNote: provider == .claude ? ClaudeParser.noReadingNote
+                readings: try db.latestReadings(provider: provider.rawValue),
+                unavailableNote: provider == .claude ? ClaudeReadings.noReadingNote
                                                      : CodexParser.noReadingNote,
-                last5Hours: try db.totals(provider: key, since: now.addingTimeInterval(-5 * 3600)),
-                last7Days: try db.totals(provider: key, since: now.addingTimeInterval(-Self.retention)),
                 filesSeen: seen,
-                filesReadThisPass: read,
-                newestLogEntry: try db.newestBucket(provider: key))
+                filesReadThisPass: read)
         } catch {
             errors.append("Couldn't read \(provider.displayName) data from the cache (\(error)).")
             return ProviderReading(provider: provider, readings: [],
-                                   unavailableNote: "The local cache couldn't be read.",
-                                   last5Hours: TokenTotals(), last7Days: TokenTotals(),
-                                   filesSeen: seen, filesReadThisPass: read, newestLogEntry: nil)
+                                   unavailableNote: "The local cache couldn't be read.")
         }
     }
 }

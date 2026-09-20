@@ -17,7 +17,7 @@ final class Database {
     /// build still running therefore keeps writing its own file and can't corrupt
     /// this one. That happened once: a v1 build running alongside a v2 build
     /// double-counted tokens.
-    static let schemaVersion: Int32 = 3
+    static let schemaVersion: Int32 = 4
 
     struct DBError: Error, CustomStringConvertible {
         let message: String
@@ -79,6 +79,7 @@ final class Database {
                 }
                 try exec("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS buckets; "
                          + "DROP TABLE IF EXISTS snapshots; DROP TABLE IF EXISTS readings;")
+                // `buckets` held token counts. The app no longer counts tokens.
             }
             // How far each log has been read. inode + offset detect replacement
             // and truncation.
@@ -89,20 +90,6 @@ final class Database {
                 inode INTEGER NOT NULL,
                 offset INTEGER NOT NULL,
                 mtime REAL NOT NULL
-            );
-            """)
-            // Token sums per 5-minute bucket: fine enough for a 5-hour window, and
-            // about 2k rows per provider per week.
-            try exec("""
-            CREATE TABLE IF NOT EXISTS buckets (
-                provider TEXT NOT NULL,
-                bucket INTEGER NOT NULL,
-                input INTEGER NOT NULL DEFAULT 0,
-                output INTEGER NOT NULL DEFAULT 0,
-                cache_read INTEGER NOT NULL DEFAULT 0,
-                cache_write INTEGER NOT NULL DEFAULT 0,
-                messages INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (provider, bucket)
             );
             """)
             // Allowance readings exactly as reported. One row per limit
@@ -224,72 +211,12 @@ final class Database {
         try run(stmt)
     }
 
-    /// Drops one provider's token totals and file offsets so its logs are
-    /// re-read. Used when a log was replaced or truncated: its earlier
-    /// contribution is folded into aggregates and cannot be subtracted.
-    func resetTokens(provider: String) throws {
-        for sql in ["DELETE FROM buckets WHERE provider=?;", "DELETE FROM files WHERE provider=?;"] {
-            let stmt = try prepare(sql)
-            defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_text(stmt, 1, provider, -1, SQLITE_TRANSIENT)
-            try run(stmt)
-        }
-    }
-
-    // MARK: - Token buckets
-
-    func addUsage(provider: String, bucket: Int64, _ t: TokenTotals) throws {
-        let stmt = try prepare("""
-        INSERT INTO buckets(provider,bucket,input,output,cache_read,cache_write,messages)
-        VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(provider,bucket) DO UPDATE SET
-          input=input+excluded.input, output=output+excluded.output,
-          cache_read=cache_read+excluded.cache_read,
-          cache_write=cache_write+excluded.cache_write,
-          messages=messages+excluded.messages;
-        """)
+    /// Forgets how far a provider's logs were read, so they are read again.
+    /// Used when a log was replaced or truncated.
+    func resetFileOffsets(provider: String) throws {
+        let stmt = try prepare("DELETE FROM files WHERE provider=?;")
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, provider, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int64(stmt, 2, bucket)
-        sqlite3_bind_int64(stmt, 3, Int64(t.input))
-        sqlite3_bind_int64(stmt, 4, Int64(t.output))
-        sqlite3_bind_int64(stmt, 5, Int64(t.cacheRead))
-        sqlite3_bind_int64(stmt, 6, Int64(t.cacheWrite))
-        sqlite3_bind_int64(stmt, 7, Int64(t.messages))
-        try run(stmt)
-    }
-
-    func totals(provider: String, since: Date) throws -> TokenTotals {
-        let stmt = try prepare("""
-        SELECT COALESCE(SUM(input),0), COALESCE(SUM(output),0), COALESCE(SUM(cache_read),0),
-               COALESCE(SUM(cache_write),0), COALESCE(SUM(messages),0)
-        FROM buckets WHERE provider=? AND bucket >= ?;
-        """)
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, provider, -1, SQLITE_TRANSIENT)
-        // Buckets are keyed by their start; include the bucket that contains `since`.
-        sqlite3_bind_int64(stmt, 2, (Int64(since.timeIntervalSince1970) / 300) * 300)
-        guard sqlite3_step(stmt) == SQLITE_ROW else { throw DBError(message: lastError) }
-        return TokenTotals(input: Int(sqlite3_column_int64(stmt, 0)),
-                           output: Int(sqlite3_column_int64(stmt, 1)),
-                           cacheRead: Int(sqlite3_column_int64(stmt, 2)),
-                           cacheWrite: Int(sqlite3_column_int64(stmt, 3)),
-                           messages: Int(sqlite3_column_int64(stmt, 4)))
-    }
-
-    func newestBucket(provider: String) throws -> Date? {
-        let stmt = try prepare("SELECT MAX(bucket) FROM buckets WHERE provider=?;")
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, provider, -1, SQLITE_TRANSIENT)
-        guard sqlite3_step(stmt) == SQLITE_ROW,
-              sqlite3_column_type(stmt, 0) != SQLITE_NULL else { return nil }
-        return Date(timeIntervalSince1970: Double(sqlite3_column_int64(stmt, 0)))
-    }
-
-    func pruneBuckets(before: Date) throws {
-        let stmt = try prepare("DELETE FROM buckets WHERE bucket < ?;")
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int64(stmt, 1, Int64(before.timeIntervalSince1970))
         try run(stmt)
     }
 

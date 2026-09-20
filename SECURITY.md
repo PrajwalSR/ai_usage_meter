@@ -1,7 +1,8 @@
 # Security
 
-This app is close to private stuff: your AI chat logs, a signed-in claude.ai
-session, and (for the backup check) your Claude Code login. This page explains what it touches, why, and
+This app is close to private stuff: Codex's logs, a signed-in claude.ai session,
+and (for the backup check) your Claude Code login. It does **not** read Claude
+Code's logs at all. This page explains what it touches, why, and
 how it keeps things safe. It also lists what it **can't** promise.
 
 ---
@@ -26,8 +27,7 @@ it. Please give reasonable time for a fix before sharing it publicly.
 flowchart TB
     subgraph Mac["Your Mac"]
         direction TB
-        C1["Claude Code logs<br/>~/.claude/projects"] -->|"read"| APP
-        C2["Codex logs<br/>~/.codex/sessions"] -->|"read"| APP
+        C2["Codex logs<br/>~/.codex/sessions"] -->|"read: limit lines only"| APP
         SL["Status line file<br/>(optional script)"] -->|"read"| APP
         WV["The app's own browser<br/>(your claude.ai session)"] -->|"asks from inside<br/>the signed-in page"| APP
         K["Keychain<br/>Claude Code-credentials"] -->|"backup check only,<br/>after you allow"| APP
@@ -38,8 +38,8 @@ flowchart TB
 
 | Thing | What the app does | When |
 |---|---|---|
-| Codex logs `~/.codex/sessions` | Reads | Always |
-| Claude Code logs `~/.claude/projects` | Reads | Always |
+| Codex logs `~/.codex/sessions` | Reads lines carrying `rate_limits` | Always |
+| Claude Code logs `~/.claude/projects` | **Never opened** | — |
 | `https://claude.ai/api/organizations…` | Sends a request from inside the signed-in page | About once a minute, once you sign in |
 | The claude.ai session cookie | **Never reads it.** It stays in the app's browser storage, which attaches it automatically | — |
 | Keychain item `Claude Code-credentials` | Reads | Backup check only: when **Check Claude usage live** is on and you click Allow |
@@ -159,18 +159,21 @@ above are strict, and why the setting is off until you choose it.
 
 ## Your chats
 
-The log files contain your conversations:
+**Claude Code's logs are never opened.** The app doesn't count tokens, so it has
+no reason to read them.
 
-1. The app scans each line for a keyword like `"usage"` or `rate_limits`.
-2. Lines without it are skipped.
-3. Lines with it are decoded in memory, which briefly includes that message's
-   text. The numbers are copied out and the rest is dropped.
+Codex's logs do hold your Codex conversations, and the app reads them like this:
+
+1. Each line is scanned for the bytes `rate_limits`.
+2. Lines without it are skipped without being decoded.
+3. A line with it is decoded in memory, the limit numbers are copied out, and the
+   rest is dropped.
 
 | Saved | Never saved |
 |---|---|
-| Token counts in 5-minute groups | Messages, prompts, answers |
-| Log file paths and how far each was read | Code |
-| Limit percentages, reset times, plan name | Logins |
+| Limit percentages, reset times, plan name | Messages, prompts, answers |
+| Codex log paths and how far each was read | Code, token counts |
+| | Logins and cookies |
 
 File paths show your project folder names, which is why the app's folder is only
 readable by your Mac user.

@@ -22,6 +22,11 @@ enum ClaudeReadings {
     /// Written by `ClaudeWebSource` from the signed-in claude.ai web view.
     static var webFileURL: URL { directory.appendingPathComponent("claude-web.json") }
 
+    /// Shown when there is no Claude reading at all.
+    static let noReadingNote =
+        "Claude doesn't write your limit to any file on this Mac. Click "
+        + "\"Sign in to Claude for live updates\" below, or turn on the backup check."
+
     /// A live check this recent always wins, even if the status line wrote more
     /// recently. The status line only says when *it received* a figure, and
     /// Claude Code may be repeating one from its last API response, so a fresh

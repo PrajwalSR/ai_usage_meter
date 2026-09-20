@@ -23,20 +23,14 @@ let sample = UsageReport(
                                   planType: nil,
                                   windows: [window(38, minutes: 300, resetsIn: 2 * 3600 + 21 * 60),
                                             window(63, minutes: 10080, resetsIn: 28 * 3600)])],
-        unavailableNote: "",
-        last5Hours: TokenTotals(input: 1_200_000, output: 180_000, cacheRead: 9_000_000, cacheWrite: 1_100_000, messages: 212),
-        last7Days: TokenTotals(input: 21_000_000, output: 2_900_000, cacheRead: 160_000_000, cacheWrite: 19_000_000, messages: 3_104),
-        filesSeen: 42, filesReadThisPass: 1, newestLogEntry: now.addingTimeInterval(-240)),
+        unavailableNote: "")),
     codex: ProviderReading(
         provider: .codex,
         readings: [AllowanceReading(recordedAt: now.addingTimeInterval(-50 * 60), source: .codexLog,
                                   planType: "prolite",
                                   windows: [window(55, minutes: 10080, resetsIn: 2 * 86400 + 21 * 3600,
                                                    limitId: "codex")])],
-        unavailableNote: "",
-        last5Hours: TokenTotals(input: 900_000, output: 60_000, cacheRead: 2_400_000, messages: 34),
-        last7Days: TokenTotals(input: 60_000_000, output: 3_100_000, cacheRead: 300_000_000, messages: 2_880),
-        filesSeen: 97, filesReadThisPass: 0, newestLogEntry: now.addingTimeInterval(-50 * 60)),
+        unavailableNote: "")),
     scannedAt: now, scanDuration: 0.02)
 
 func savePNG(_ rep: NSBitmapImageRep, _ name: String) {

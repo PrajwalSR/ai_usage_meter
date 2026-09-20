@@ -67,7 +67,7 @@ struct UsagePanel: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
-            Text("Updated \(Fmt.age(report.scannedAt, now: now)) · " + filesNote(report))
+            Text("Updated \(Fmt.age(report.scannedAt, now: now))")
                 .font(.caption2).foregroundStyle(.secondary)
 
             ForEach(Array(report.errors.prefix(3).enumerated()), id: \.offset) { _, err in
@@ -111,11 +111,6 @@ struct UsagePanel: View {
         }
     }
 
-    /// "no new data" means every log was already indexed and the pass was cheap.
-    private func filesNote(_ report: UsageReport) -> String {
-        let read = (report.codex?.filesReadThisPass ?? 0) + (report.claude?.filesReadThisPass ?? 0)
-        return read == 0 ? "no new data" : "\(read) file\(read == 1 ? "" : "s") read"
-    }
 }
 
 struct ProviderCard: View {
@@ -135,23 +130,6 @@ struct ProviderCard: View {
             }
 
             allowanceSection
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(reading.provider == .claude ? "Claude Code tokens on this Mac"
-                                                 : "Codex tokens on this Mac")
-                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                row("Last 5 hours", reading.last5Hours)
-                row("Last 7 days", reading.last7Days)
-            }
-            .padding(.top, 3)
-
-            if let newest = reading.newestLogEntry {
-                Text("Newest entry \(Fmt.age(newest, now: now)) · \(reading.filesSeen) files")
-                    .font(.caption2).foregroundStyle(.secondary)
-            } else {
-                Text("No usage entries in the last 7 days · \(reading.filesSeen) files")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
         }
         .padding(10)
         .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
@@ -260,16 +238,6 @@ struct ProviderCard: View {
         case .anthropicLive: return base + "It updates at the next live check."
         case .claudeWeb: return base + "It updates at the next check with claude.ai."
         case .claudeStatusLine: return base + "It updates the next time Claude Code runs in a terminal."
-        }
-    }
-
-    private func row(_ label: String, _ t: TokenTotals) -> some View {
-        HStack {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            Text("\(Fmt.tokens(t.total)) tok").font(.caption.monospacedDigit())
-            Text("· \(t.messages) msg")
-                .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
         }
     }
 
