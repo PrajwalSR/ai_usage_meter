@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Firefly icon with ivory wings and a glowing amber tail on charcoal">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#252B30"/><stop offset="1" stop-color="#13191D"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop stop-color="#FFC857" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#FFC857" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tail" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#FFF2A6"/><stop offset="1" stop-color="#FFB844"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="110" fill="url(#background)"/>
+  <circle cx="256" cy="321" r="133" fill="url(#glow)"/>
+  <path d="M244 169Q235 142 219 132M268 169Q277 142 293 132" fill="none" stroke="#E1E8DE" stroke-width="9" stroke-linecap="round"/>
+  <path d="M241 225C218 184 177 173 160 194C139 220 165 267 229 284C240 270 245 248 241 225Z" fill="#DFE9E3"/>
+  <path d="M271 225C294 184 335 173 352 194C373 220 347 267 283 284C272 270 267 248 271 225Z" fill="#DFE9E3"/>
+  <path d="M239 245C211 238 180 257 178 280C177 303 205 317 236 298Z" fill="#9DAFA6"/>
+  <path d="M273 245C301 238 332 257 334 280C335 303 307 317 276 298Z" fill="#9DAFA6"/>
+  <rect x="232" y="211" width="48" height="94" rx="24" fill="#657A70"/>
+  <path d="M228 289Q256 281 284 289V318C284 343 272 359 256 368C240 359 228 343 228 318Z" fill="url(#tail)"/>
+  <path d="M241 310V319Q241 332 248 340" fill="none" stroke="#FFF7CA" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="256" cy="191" r="29" fill="#DFE9E3"/>
+  <circle cx="246" cy="192" r="4" fill="#28372F"/>
+  <circle cx="266" cy="192" r="4" fill="#28372F"/>
+</svg>
