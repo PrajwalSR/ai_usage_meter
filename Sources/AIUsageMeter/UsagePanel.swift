@@ -1,117 +1,182 @@
 import SwiftUI
 
-/// The popover panel. A pure function of the values passed in: no SwiftUI state
+/// Everything the panel needs, passed in as plain values. No SwiftUI state
 /// macros (they didn't build with Command Line Tools alone), and `now` is passed
 /// in so expiry and "… ago" text are recomputed on every redraw.
+struct PanelModel {
+    var report: UsageReport?
+    var isScanning: Bool
+    var isWatching: Bool
+    var showingSettings: Bool
+    var claudeSignedIn: Bool
+    var chatGPTSignedIn: Bool
+    var launchAtLoginAvailable: Bool
+    var launchesAtLogin: Bool
+    var errors: [String]
+    var now: Date
+}
+
+struct PanelActions {
+    var refresh: () -> Void
+    var toggleSettings: () -> Void
+    var signInToClaude: () -> Void
+    var signInToChatGPT: () -> Void
+    var toggleLaunchAtLogin: (Bool) -> Void
+    var quit: () -> Void
+}
+
+/// The popover: usage on the front, everything else behind the gear.
 struct UsagePanel: View {
-    let report: UsageReport?
-    let isScanning: Bool
-    let isWatching: Bool
-    let liveClaudeEnabled: Bool
-    let webSignedIn: Bool
-    let onSignInToClaudeWeb: () -> Void
-    let launchAtLoginAvailable: Bool
-    let launchesAtLogin: Bool
-    let errorText: String?
-    let now: Date
-    let onRefresh: () -> Void
-    let onToggleLiveClaude: (Bool) -> Void
-    let onToggleLaunchAtLogin: (Bool) -> Void
-    let onQuit: () -> Void
+    let model: PanelModel
+    let actions: PanelActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
             Divider()
-            if let report {
-                if let codex = report.codex { ProviderCard(reading: codex, now: now) }
-                if let claude = report.claude { ProviderCard(reading: claude, now: now) }
-                Divider()
-                footer(report)
+            if model.showingSettings {
+                SettingsPage(model: model, actions: actions)
+            } else {
+                usagePage
+            }
+        }
+        .padding(14)
+        .frame(width: 340)
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(model.showingSettings ? "Settings" : "AI Usage Meter").font(.headline)
+            Spacer()
+            if model.isScanning {
+                ProgressView().controlSize(.small)
+            } else if !model.showingSettings {
+                Button(action: actions.refresh) { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless)
+                    .help("Check now")
+            }
+            Button(action: actions.toggleSettings) {
+                Image(systemName: model.showingSettings ? "chevron.backward" : "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help(model.showingSettings ? "Back to usage" : "Settings")
+        }
+    }
+
+    // MARK: Usage
+
+    private var usagePage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let report = model.report {
+                if let codex = report.codex { ProviderCard(reading: codex, now: model.now) }
+                if let claude = report.claude { ProviderCard(reading: claude, now: model.now) }
+
+                // Anything needing attention is one short line with a way to fix
+                // it; the details live in Settings.
+                if !model.errors.isEmpty {
+                    Button(action: actions.toggleSettings) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                            Text(model.errors.count == 1 ? "1 thing needs attention"
+                                                         : "\(model.errors.count) things need attention")
+                        }
+                        .font(.caption)
+                    }
+                    .buttonStyle(.link)
+                    .foregroundStyle(.orange)
+                }
+
+                Text("Updated \(Fmt.age(report.scannedAt, now: model.now))")
+                    .font(.caption2).foregroundStyle(.secondary)
             } else {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Reading local logs…").foregroundStyle(.secondary)
+                    Text("Reading…").foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 10)
             }
         }
-        .padding(14)
-        .frame(width: 350)
     }
-
-    private var header: some View {
-        HStack {
-            Text("AI Usage Meter").font(.headline)
-            Spacer()
-            if isScanning {
-                ProgressView().controlSize(.small)
-            } else {
-                Button(action: onRefresh) { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless)
-                    .help(liveClaudeEnabled
-                          ? "Re-read local logs and check Claude usage with Anthropic."
-                          : "Re-read local logs.")
-            }
-        }
-    }
-
-    private func footer(_ report: UsageReport) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(isWatching ? Color.green : Color.orange)
-                    .frame(width: 6, height: 6)
-                Text(isWatching ? "Watching logs · updates automatically"
-                                : "Not watching logs · press ⟳ to update")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-
-            Text("Updated \(Fmt.age(report.scannedAt, now: now))")
-                .font(.caption2).foregroundStyle(.secondary)
-
-            ForEach(Array(report.errors.prefix(3).enumerated()), id: \.offset) { _, err in
-                Text(err).font(.caption2).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let errorText {
-                Text(errorText).font(.caption2).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if !webSignedIn {
-                Button(action: onSignInToClaudeWeb) {
-                    Text("Sign in to Claude for live updates").font(.caption)
-                }
-                .buttonStyle(.link)
-                .help("Opens Anthropic's own sign-in page in a window this app owns, "
-                      + "then reads your usage from claude.ai every minute.")
-            }
-
-            Toggle(isOn: Binding(get: { liveClaudeEnabled }, set: { onToggleLiveClaude($0) })) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Check Claude usage live").font(.caption)
-                    Text("Uses your Claude Code login · asks Anthropic when you open this panel")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.checkbox)
-
-            if launchAtLoginAvailable {
-                Toggle(isOn: Binding(get: { launchesAtLogin }, set: { onToggleLaunchAtLogin($0) })) {
-                    Text("Open at login").font(.caption)
-                }
-                .toggleStyle(.checkbox)
-            }
-
-            HStack {
-                Button("Quit", action: onQuit).buttonStyle(.borderless).font(.caption)
-                Spacer()
-            }
-        }
-    }
-
 }
+
+// MARK: - Settings
+
+struct SettingsPage: View {
+    let model: PanelModel
+    let actions: PanelActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Accounts").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                accountRow(name: "Claude", detail: "claude.ai · every minute",
+                           signedIn: model.claudeSignedIn, signIn: actions.signInToClaude)
+                accountRow(name: "ChatGPT", detail: "chatgpt.com · every minute",
+                           signedIn: model.chatGPTSignedIn, signIn: actions.signInToChatGPT)
+                Text("Sign-in happens on the provider's own page, in a window this app owns. "
+                     + "Use email: Google sign-in doesn't work in app windows.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Options").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if model.launchAtLoginAvailable {
+                    Toggle(isOn: Binding(get: { model.launchesAtLogin },
+                                         set: { actions.toggleLaunchAtLogin($0) })) {
+                        Text("Open at login").font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                }
+            }
+
+            if !model.errors.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Needs attention").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(Array(model.errors.prefix(4).enumerated()), id: \.offset) { _, err in
+                        Text(err).font(.caption2).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 5) {
+                Circle().fill(model.isWatching ? Color.green : Color.orange)
+                    .frame(width: 6, height: 6)
+                Text(model.isWatching ? "Watching Codex logs" : "Not watching logs")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Button("Quit", action: actions.quit).buttonStyle(.borderless).font(.caption)
+            }
+        }
+    }
+
+    private func accountRow(name: String, detail: String,
+                            signedIn: Bool, signIn: @escaping () -> Void) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.caption.weight(.medium))
+                Text(detail).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if signedIn {
+                HStack(spacing: 3) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text("Signed in").font(.caption2).foregroundStyle(.secondary)
+                }
+            } else {
+                Button("Sign in", action: signIn).font(.caption)
+            }
+        }
+    }
+}
+
+// MARK: - One provider's card
 
 struct ProviderCard: View {
     let reading: ProviderReading
@@ -128,7 +193,6 @@ struct ProviderCard: View {
                 }
                 Spacer()
             }
-
             allowanceSection
         }
         .padding(10)
@@ -157,13 +221,15 @@ struct ProviderCard: View {
     }
 
     /// Names the limit so it isn't mistaken for general chat usage. For Codex it
-    /// includes `limit_id` when it isn't the usual "codex".
+    /// includes the provider's own limit id when it isn't the usual one.
     private func limitName(_ w: AllowanceWindow) -> String {
         switch reading.provider {
         case .claude:
             return "\(w.windowLabel) limit"
         case .codex:
-            if let id = w.limitId, id != "codex" { return "\(w.windowLabel) Codex limit (\(id))" }
+            if let id = w.limitId, !["codex", "primary", "secondary"].contains(id) {
+                return "\(w.windowLabel) Codex limit (\(id))"
+            }
             return "\(w.windowLabel) Codex limit"
         }
     }
@@ -180,8 +246,7 @@ struct ProviderCard: View {
                     Text("of \(limitName(head)) used")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                ProgressView(value: min(head.usedPercent, 100), total: 100)
-                    .tint(tint(head.usedPercent))
+                bar(head.usedPercent)
                 if let resets = head.resetsAt {
                     Text("Resets \(Fmt.until(resets, now: now)) · \(Fmt.clock(resets))")
                         .font(.caption2).foregroundStyle(.secondary)
@@ -192,8 +257,7 @@ struct ProviderCard: View {
                     HStack(spacing: 6) {
                         Text(w.windowLabel.capitalized)
                             .font(.caption).foregroundStyle(.secondary)
-                        ProgressView(value: min(w.usedPercent, 100), total: 100)
-                            .tint(tint(w.usedPercent))
+                        bar(w.usedPercent)
                         Text("\(Int(w.usedPercent.rounded()))%")
                             .font(.caption.monospacedDigit())
                         if let r = w.resetsAt {
@@ -229,19 +293,27 @@ struct ProviderCard: View {
         }
     }
 
+    private func bar(_ percent: Double) -> some View {
+        ProgressView(value: min(percent, 100), total: 100).tint(tint(percent))
+    }
+
     /// What happens next depends on where the reading came from.
     private func expiredExplanation(_ source: ReadingSource) -> String {
         let base = "The last reading's limit has reset since it was taken, so the current "
                  + "figure isn't known yet. "
         switch source {
         case .codexLog: return base + "It updates the next time Codex runs."
-        case .anthropicLive: return base + "It updates at the next live check."
-        case .claudeWeb: return base + "It updates at the next check with claude.ai."
         case .claudeStatusLine: return base + "It updates the next time Claude Code runs in a terminal."
+        case .claudeWeb: return base + "It updates at the next check with claude.ai."
+        case .chatgptWeb: return base + "It updates at the next check with chatgpt.com."
         }
     }
 
+    /// Same bands as the menu bar, so both always agree. Below 25% the figure
+    /// uses the ordinary text colour (the accent colour is nearly invisible on
+    /// this card in some themes).
     private func tint(_ pct: Double) -> Color {
-        pct >= 90 ? .red : (pct >= 75 ? .orange : .accentColor)
+        let band = ProviderIcons.UsageBand(usedPercent: pct.rounded())
+        return band == .plain ? .primary : Color(nsColor: band.color)
     }
 }

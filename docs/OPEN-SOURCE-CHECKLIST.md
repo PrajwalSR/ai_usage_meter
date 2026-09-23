@@ -5,7 +5,7 @@ GitHub backup; that only needs [the last section](#before-any-push-even-private)
 
 ```mermaid
 flowchart LR
-    P["Private backup"] --> D["Decide: license,<br/>logos, live check"] --> T["Test from a<br/>clean clone"] --> R["Public"]
+    P["Private backup"] --> D["Decide: license,<br/>logos"] --> T["Test from a<br/>clean clone"] --> R["Public"]
 ```
 
 ---
@@ -32,24 +32,20 @@ logos are **trademarks**. See [assets/README.md](../assets/README.md).
 - Keep the "not made by or connected to Anthropic or OpenAI" line in the README.
 - If either company objects, swap in plain text labels.
 
-### The claude.ai sign-in
+### The website sign-ins
 
-Claude's numbers come from claude.ai's own usage endpoints, read from inside a
-sign-in window the app owns. Before publishing, decide:
+Claude's and ChatGPT's numbers come from claude.ai's and chatgpt.com's own usage
+endpoints, read from inside sign-in windows the app owns. Before publishing,
+decide:
 
 - **Are you comfortable shipping an embedded sign-in?** Users should be told
   plainly whose page they are typing a password into. The README and SECURITY.md
   say so; keep that prominent.
-- **Anthropic's terms.** These endpoints are not a published API. Using them for a
-  personal read-only usage meter is the same thing several App Store apps do, but
-  it is not a documented, supported interface, and Anthropic could object or
-  change it.
+- **Anthropic's and OpenAI's terms.** These endpoints are not published APIs.
+  Using them for a personal read-only usage meter is the same thing several App
+  Store apps do, but they are not documented, supported interfaces, and either
+  company could object or change them.
 - **Google sign-in doesn't work** inside embedded windows. Keep that in the README.
-
-### The backup check
-
-api.anthropic.com is rate-limited and unpublished. It's **off by default**.
-Decide whether to ship it at all, or leave claude.ai plus the status line.
 
 ---
 
@@ -64,8 +60,6 @@ Decide whether to ship it at all, or leave claude.ai plus the status line.
 ## 3. Clean up
 
 - [ ] **Keep `assets/app-icon.svg`.** It's the editable source of the app icon.
-- [ ] Decide on `assets/matchstick-concept.svg`, an unused icon idea. Keep it as a
-      design record, or remove it.
 - [ ] Consider a unique bundle id instead of `local.aiusagemeter`, like
       `io.github.prajwalsr.aiusagemeter`. Change it in `build-app.sh` and in the
       `defaults write` command in the README.
@@ -73,8 +67,11 @@ Decide whether to ship it at all, or leave claude.ai plus the status line.
 ## 4. Test like a new user
 
 - [ ] Clone into a new folder and follow the README exactly
-- [ ] Try with **only** Codex installed, and with **only** Claude Code installed
-- [ ] Try with live check off, then on, then Deny at the Keychain popup
+- [ ] Before signing in to anything: no warnings in the panel, and `lsof` (see
+      SECURITY.md) shows no connections
+- [ ] Sign in to each site; both cards switch to "From claude.ai" / "From chatgpt.com"
+- [ ] Without the ChatGPT sign-in, the ChatGPT card still works from Codex's logs
+- [ ] Confirm macOS never shows a Keychain prompt
 - [ ] Check that the screenshots still match the app (`./scripts/render-screenshots.sh`)
 
 ## 5. Optional: ready-made downloads
@@ -104,6 +101,6 @@ In `git status`, make sure **none** of these appear:
 - `build/` or `.build/`
 - any `.sqlite`, `.db` or `Cache.db` file
 - any `.jsonl` file (session logs)
-- `claude.json`, `claude-live.json`, `auth.json`
+- `claude.json`, `claude-web.json`, `codex-web.json`, `*-raw.json`, `auth.json`
 
 They're all in `.gitignore`, but check anyway before you commit.

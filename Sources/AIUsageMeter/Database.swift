@@ -243,6 +243,21 @@ final class Database {
         }
     }
 
+    /// Removes every stored reading from one source.
+    ///
+    /// Used for sources that report their whole set of limits at once (the
+    /// websites, the status line): the newest reply is the truth,
+    /// so an entry that has disappeared — or was stored under an older name —
+    /// must not linger as if it were a separate limit. Log-derived readings are
+    /// never cleared this way: each log line is its own point-in-time record.
+    func deleteReadings(provider: String, source: ReadingSource) throws {
+        let stmt = try prepare("DELETE FROM readings WHERE provider=? AND source=?;")
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, provider, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, source.rawValue, -1, SQLITE_TRANSIENT)
+        try run(stmt)
+    }
+
     /// The newest reading for each (source, limit) of a provider.
     func latestReadings(provider: String) throws -> [AllowanceReading] {
         let stmt = try prepare("""

@@ -33,7 +33,7 @@ if CommandLine.arguments.contains("--scan") {
             case .available(let head, let others, let source):
                 for w in [head] + others {
                     let resets = w.resetsAt.map { "resets \(Fmt.clock($0)) (\(Fmt.until($0, now: now)))" } ?? ""
-                    print("  \(w.usedPercent)% of \(w.windowLabel) window"
+                    print("  \(w.usedPercent)% of the \(w.windowLabel) limit"
                           + (w.limitId.map { " [\($0)]" } ?? "") + "  \(resets)")
                 }
                 print("  source:  \(Fmt.sourceLine(source, now: now))"
@@ -57,22 +57,6 @@ if CommandLine.arguments.contains("--scan") {
     exit(0)
 }
 
-// MARK: - `--check-claude`: one live check, with the server's reply spelled out
-
-// Prints the HTTP status, any rate-limit headers and the server's error text, so
-// a failing live check can be diagnosed. It never prints the login.
-if CommandLine.arguments.contains("--check-claude") {
-    let failure = ClaudeLiveUsage.refresh()
-    if let r = ClaudeLiveUsage.lastResponse {
-        print("HTTP \(r.status)")
-        if let ra = r.retryAfter { print("Retry-After: \(ra)") }
-        for (k, v) in r.rateLimitHeaders.sorted(by: { $0.key < $1.key }) { print("\(k): \(v)") }
-        if let body = r.bodyPreview { print("body: \(body)") }
-    }
-    print(failure.map { "result: \($0.description)" } ?? "result: success, reading saved")
-    exit(failure == nil ? 0 : 1)
-}
-
 // MARK: - `--check-claude-web`: try the claude.ai website route
 
 // Signs in through a window this app owns (if needed) and prints the raw usage
@@ -85,7 +69,7 @@ if CommandLine.arguments.contains("--check-claude-web") {
         var attempts = 0
         @MainActor func attempt() {
             attempts += 1
-            ClaudeWebSession.shared.fetchRawUsage { result in
+            WebSession.claude.fetchRawUsage { result in
                 switch result {
                 case .success(let json):
                     print(json)
@@ -94,7 +78,7 @@ if CommandLine.arguments.contains("--check-claude-web") {
                     if case .notSignedIn = failure, attempts == 1 {
                         print("Not signed in — opening the Claude sign-in window.")
                         print("Sign in there; this keeps checking every 5 s.")
-                        ClaudeWebSession.shared.showLoginWindow()
+                        WebSession.claude.showLoginWindow()
                     } else {
                         print("attempt \(attempts): \(failure.description)")
                     }
@@ -146,20 +130,24 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func updateContent() {
         let view = UsagePanel(
-            report: store.report,
-            isScanning: store.isScanning,
-            isWatching: store.isWatching,
-            liveClaudeEnabled: store.liveClaudeEnabled,
-            webSignedIn: store.webSignedIn,
-            onSignInToClaudeWeb: { [weak self] in self?.store.signInToClaudeWeb() },
-            launchAtLoginAvailable: store.launchAtLoginAvailable,
-            launchesAtLogin: store.launchesAtLogin,
-            errorText: [store.indexError, store.webError, store.liveClaudeError].compactMap { $0 }.first,
-            now: Date(),
-            onRefresh: { [weak self] in self?.store.refreshAll() },
-            onToggleLiveClaude: { [weak self] on in self?.store.setLiveClaudeEnabled(on) },
-            onToggleLaunchAtLogin: { [weak self] on in self?.store.setLaunchAtLogin(on) },
-            onQuit: { NSApp.terminate(nil) })
+            model: PanelModel(
+                report: store.report,
+                isScanning: store.isScanning,
+                isWatching: store.isWatching,
+                showingSettings: store.showingSettings,
+                claudeSignedIn: store.claudeSignedIn,
+                chatGPTSignedIn: store.chatGPTSignedIn,
+                launchAtLoginAvailable: store.launchAtLoginAvailable,
+                launchesAtLogin: store.launchesAtLogin,
+                errors: store.attentionItems,
+                now: Date()),
+            actions: PanelActions(
+                refresh: { [weak self] in self?.store.refreshAll() },
+                toggleSettings: { [weak self] in self?.store.toggleSettings() },
+                signInToClaude: { [weak self] in self?.store.signIn(to: .claude) },
+                signInToChatGPT: { [weak self] in self?.store.signIn(to: .chatGPT) },
+                toggleLaunchAtLogin: { [weak self] on in self?.store.setLaunchAtLogin(on) },
+                quit: { NSApp.terminate(nil) }))
         if let hosting = popover.contentViewController as? NSHostingController<UsagePanel> {
             hosting.rootView = view
         } else {
@@ -175,9 +163,6 @@ final class AppController: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            // A good moment for a fresh Claude number: the user is looking, and
-            // it keeps background checks rare.
-            store.panelOpened()
             updateContent()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()

@@ -19,18 +19,18 @@ func window(_ pct: Double, minutes: Int, resetsIn: TimeInterval, limitId: String
 let sample = UsageReport(
     claude: ProviderReading(
         provider: .claude,
-        readings: [AllowanceReading(recordedAt: now.addingTimeInterval(-90), source: .anthropicLive,
+        readings: [AllowanceReading(recordedAt: now.addingTimeInterval(-90), source: .claudeWeb,
                                   planType: nil,
                                   windows: [window(38, minutes: 300, resetsIn: 2 * 3600 + 21 * 60),
                                             window(63, minutes: 10080, resetsIn: 28 * 3600)])],
-        unavailableNote: "")),
+        unavailableNote: ""),
     codex: ProviderReading(
         provider: .codex,
-        readings: [AllowanceReading(recordedAt: now.addingTimeInterval(-50 * 60), source: .codexLog,
-                                  planType: "prolite",
-                                  windows: [window(55, minutes: 10080, resetsIn: 2 * 86400 + 21 * 3600,
+        readings: [AllowanceReading(recordedAt: now.addingTimeInterval(-40), source: .chatgptWeb,
+                                  planType: "plus",
+                                  windows: [window(86, minutes: 10080, resetsIn: 2 * 86400 + 21 * 3600,
                                                    limitId: "codex")])],
-        unavailableNote: "")),
+        unavailableNote: ""),
     scannedAt: now, scanDuration: 0.02)
 
 func savePNG(_ rep: NSBitmapImageRep, _ name: String) {
@@ -42,13 +42,17 @@ func savePNG(_ rep: NSBitmapImageRep, _ name: String) {
 // MARK: Panel, light and dark
 
 MainActor.assumeIsolated {
-    for (name, appearance) in [("panel-light.png", NSAppearance.Name.aqua),
-                               ("panel-dark.png", NSAppearance.Name.darkAqua)] {
+    for (name, appearance, settings) in [("panel-light.png", NSAppearance.Name.aqua, false),
+                                         ("panel-dark.png", NSAppearance.Name.darkAqua, false),
+                                         ("settings-dark.png", NSAppearance.Name.darkAqua, true)] {
         let panel = UsagePanel(
-            report: sample, isScanning: false, isWatching: true, liveClaudeEnabled: true,
-            webSignedIn: true, onSignInToClaudeWeb: {},
-            launchAtLoginAvailable: true, launchesAtLogin: true, errorText: nil, now: now,
-            onRefresh: {}, onToggleLiveClaude: { _ in }, onToggleLaunchAtLogin: { _ in }, onQuit: {})
+            model: PanelModel(report: sample, isScanning: false, isWatching: true,
+                              showingSettings: settings, claudeSignedIn: true, chatGPTSignedIn: false,
+                              launchAtLoginAvailable: true,
+                              launchesAtLogin: true, errors: [], now: now),
+            actions: PanelActions(refresh: {}, toggleSettings: {}, signInToClaude: {},
+                                  signInToChatGPT: {},
+                                  toggleLaunchAtLogin: { _ in }, quit: {}))
         let host = NSHostingView(rootView: panel
             .background(appearance == .darkAqua ? Color(white: 0.16) : Color(white: 0.97)))
         host.appearance = NSAppearance(named: appearance)
@@ -63,12 +67,11 @@ MainActor.assumeIsolated {
 
     // MARK: Menu bar, light and dark
 
-    let codexText = UsageStore.menuBarText(sample.codex!, now: now)
-    let claudeText = UsageStore.menuBarText(sample.claude!, now: now)
-    let label = ProviderIcons.menuBarImage(codex: codexText, claude: claudeText)
+    let label = ProviderIcons.menuBarImage(codex: UsageStore.menuBarFigure(sample.codex!, now: now),
+                                           claude: UsageStore.menuBarFigure(sample.claude!, now: now))
 
-    for (name, background, ink) in [("menubar-light.png", NSColor(white: 0.93, alpha: 1), NSColor.black),
-                                    ("menubar-dark.png", NSColor(white: 0.10, alpha: 1), NSColor.white)] {
+    for (name, background, appearance) in [("menubar-light.png", NSColor(white: 0.93, alpha: 1), NSAppearance.Name.aqua),
+                                           ("menubar-dark.png", NSColor(white: 0.10, alpha: 1), NSAppearance.Name.darkAqua)] {
         let scale: CGFloat = 2
         let padding: CGFloat = 12
         let size = NSSize(width: label.size.width + padding * 2, height: 28)
@@ -82,15 +85,12 @@ MainActor.assumeIsolated {
         background.setFill()
         NSRect(origin: .zero, size: size).fill()
 
-        // A template image is drawn black; tint it the way the menu bar would.
-        let tinted = NSImage(size: label.size, flipped: false) { rect in
-            label.draw(in: rect)
-            ink.set()
-            rect.fill(using: .sourceAtop)
-            return true
+        // The label resolves its colours under the current appearance, as the
+        // menu bar would.
+        NSAppearance(named: appearance)!.performAsCurrentDrawingAppearance {
+            label.draw(in: NSRect(x: padding, y: (size.height - label.size.height) / 2,
+                                  width: label.size.width, height: label.size.height))
         }
-        tinted.draw(in: NSRect(x: padding, y: (size.height - label.size.height) / 2,
-                               width: label.size.width, height: label.size.height))
         NSGraphicsContext.restoreGraphicsState()
         savePNG(rep, name)
     }

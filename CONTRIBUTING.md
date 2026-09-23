@@ -19,12 +19,13 @@ flowchart LR
 ```
 
 1. **Never guess a limit.** Only show a percentage Anthropic or OpenAI reported.
-   Token counts are not limits.
+   The app counts no tokens.
 2. **Always say where a number came from and how old it is.**
 3. **Old is not zero.** Check expiry against the current time whenever something
    is drawn, not only when data is loaded.
-4. **Nothing online unless the user turns it on.** Today that means only the live
-   Claude check.
+4. **Nothing online unless the user turns it on.** A website is only contacted
+   after the user clicks **Sign in** for it (`UsageStore.isEnabled`). Never read
+   the Keychain.
 
 ---
 
@@ -49,9 +50,6 @@ open "build/AI Usage Meter.app"                # start the new one
 ./build/AIUsageMeter --scan                    # print numbers without the UI
 ./scripts/render-screenshots.sh                # regenerate README screenshots
 ```
-
-**After every rebuild, macOS asks for Keychain access again** if the live check is
-on. That's normal. Click **Always Allow**.
 
 ### Why not Xcode or `swift build`?
 
@@ -87,12 +85,13 @@ What's covered today:
 |---|---|
 | Line reading | Oversized lines skipped (inside one chunk, and across chunks) with the offset right; half-written lines aren't counted; resuming reads only new lines |
 | Expiry | Unknown instead of 0%; a number turns to unknown when its window resets, without a rescan; expired windows are dropped |
-| Codex | All windows and `limit_id` kept; a newer reading for one limit doesn't hide another; window length taken from `window_minutes`; cached tokens not counted twice |
-| Claude sources | Separate files per source; claude.ai beats the others when recent; a fresh api.anthropic.com check beats a newer status-line reading; a stale one doesn't; an expired one never hides a valid one; old file formats load |
-| claude.ai parsing | Real windows kept, internal code-name entries ignored, unfamiliar-but-real limits kept under their own name |
+| Codex | All windows and `limit_id` kept; a newer reading for one limit doesn't hide another; window length taken from `window_minutes`; only limit lines are read |
+| Claude sources | Separate files per source; claude.ai beats the others when recent; an expired one never hides a valid one; old file formats load |
+| Website parsing | claude.ai: real windows kept, internal code-name entries ignored, unfamiliar-but-real limits kept under their own name. chatgpt.com: rank-named windows keep their length and reset |
+| Source priority | A fresh website reading wins; a stale one loses to the log; a new website reading replaces that source's earlier set |
+| Menu bar | Text format; colour bands (plain / yellow / orange / red) use the rounded figure |
 | Staleness | A window with no reset time goes stale once older than its own length (Anthropic omits the reset at 0%) |
-| Rate limits | Backoff grows 15 → 30 → 60 min and stops there |
-| Database | Rollback removes tokens *and* offsets; per-file savepoint; write errors throw; schema version in the file name; reopening keeps data; a pass refuses a mismatched schema |
+| Database | Rollback removes readings *and* offsets; per-file savepoint; write errors throw; schema version in the file name; reopening keeps data; a pass refuses a mismatched schema |
 | Instance lock | A second copy is refused until the first releases |
 
 **Add a test with every bug fix.** Write it so it fails before your fix.
@@ -101,9 +100,10 @@ What's covered today:
 
 - Menu bar shows both logos and numbers, in Light and Dark mode
 - Panel footer has no orange errors
-- Signed in to claude.ai: the Claude card says "From claude.ai · …" and updates about every minute
-- Not signed in: the panel offers **Sign in to Claude for live updates**
-- With the backup check on: it fills in when claude.ai has no recent answer
+- Signed in: the cards say "From claude.ai · …" / "From chatgpt.com · …" and update about every minute
+- Fresh install, not signed in: ⚙ → Accounts offers **Sign in**, no warnings appear, and `lsof` shows no connections
+- Percentages change colour at 25%, 50% and 80%, in the menu bar and the panel
+- macOS never shows a Keychain prompt
 - `statusline/debug.log` records sign-in and request events, never cookies
 - `--scan` numbers match Claude's `/usage` screen and your Codex usage
 
@@ -115,15 +115,15 @@ What's covered today:
 |---|---|
 | Change how the panel looks | `UsagePanel.swift` |
 | Change the menu bar text | `UsageStore.menuBarText` |
+| Change the usage colours | `ProviderIcons.UsageBand` (menu bar and panel share it) |
 | Change the menu bar logos | `ProviderIcons.swift`, `assets/` |
-| Decide which Claude source wins | `ClaudeReadings.choose` |
-| Fix the claude.ai sign-in window | `ClaudeWebSession.swift` |
-| Fix claude.ai field mapping | `ClaudeWebSource.swift` (check `statusline/claude-web-raw.json`) |
+| Decide which source wins | `ReadingSelection.choose` in `Models.swift` |
+| Fix a sign-in window or site script | `WebSession.swift` |
+| Fix website field mapping | `WebUsageSource.swift` (check `statusline/claude-web-raw.json` / `chatgpt-web-raw.json`) |
 | Change the cache schema | `Database.swift`: bump `schemaVersion` (the file name follows) |
-| Fix the live Claude check | `ClaudeLiveUsage.swift` |
 | Fix Codex numbers | `CodexParser.swift` |
 | Change which window is the big number | `Provider.headline` in `Models.swift` |
-| Change how often things refresh | `ClaudeLiveUsage.pollInterval`, the 30 s timer in `UsageStore`, `FileWatcher` debounce |
+| Change how often things refresh | `WebUsageSource.pollInterval`, the 30 s timer in `UsageStore`, `FileWatcher` debounce |
 | Change the app icon | `assets/app-icon.svg`, then `./scripts/make-app-icon.sh` |
 
 Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -146,11 +146,12 @@ Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Code style
 
 - Comments explain **why**, not what.
-- Keep private data out of logs, errors and files: no logins, no chat text.
+- Keep private data out of logs, errors and files: no logins, tokens or chat text.
 - **Never use `URLSession.shared`.** It saves requests to disk, login header
   included. See [SECURITY.md](SECURITY.md#past-issues).
-- **Never read the claude.ai cookie, or any browser's cookie store.** Ask from
-  inside the signed-in page instead, so the web view attaches its own cookie.
+- **Never read a site's cookie or token, or any browser's cookie store.** Ask
+  from inside the signed-in page instead, so the web view attaches its own cookie.
+- **Never read the Keychain.**
 - Database writes must `throw` on failure. Don't swallow them with `try?`.
 - Match the style of the file you're editing.
 
@@ -159,5 +160,5 @@ Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - [ ] `./build-app.sh` builds with no errors
 - [ ] `./scripts/run-tests.sh` passes, with a new test if you fixed a bug
 - [ ] The app works in Light and Dark mode
-- [ ] If you touched network, Keychain or file code, the [SECURITY.md](SECURITY.md) checklist passes
+- [ ] If you touched network or file code, the [SECURITY.md](SECURITY.md) checklist passes
 - [ ] Docs and comments match what the code does

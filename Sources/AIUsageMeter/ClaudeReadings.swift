@@ -6,7 +6,6 @@ import Foundation
 ///
 /// | File                            | Written by                     | Source              |
 /// |---------------------------------|--------------------------------|---------------------|
-/// | `statusline/claude-live.json`   | `ClaudeLiveUsage` (this app)   | `.anthropicLive`    |
 /// | `statusline/claude.json`        | `scripts/claude-statusline.py` | `.claudeStatusLine` |
 ///
 /// Which one is shown is decided by `choose(_:now:)`.
@@ -17,55 +16,27 @@ enum ClaudeReadings {
     static var directory: URL {
         Database.defaultURL.deletingLastPathComponent().appendingPathComponent("statusline")
     }
-    static var liveFileURL: URL { directory.appendingPathComponent("claude-live.json") }
     static var statusLineFileURL: URL { directory.appendingPathComponent("claude.json") }
-    /// Written by `ClaudeWebSource` from the signed-in claude.ai web view.
+    /// Written by `WebUsageSource` from the signed-in claude.ai web view.
     static var webFileURL: URL { directory.appendingPathComponent("claude-web.json") }
 
     /// Shown when there is no Claude reading at all.
     static let noReadingNote =
-        "Claude doesn't write your limit to any file on this Mac. Click "
-        + "\"Sign in to Claude for live updates\" below, or turn on the backup check."
-
-    /// A live check this recent always wins, even if the status line wrote more
-    /// recently. The status line only says when *it received* a figure, and
-    /// Claude Code may be repeating one from its last API response, so a fresh
-    /// check with Anthropic is the better source.
-    static let liveFreshness: TimeInterval = 15 * 60
+        "Claude doesn't write your limit to any file on this Mac. Sign in to Claude "
+        + "under ⚙ → Accounts, or set up the Claude Code status line."
 
     /// All readings currently on disk.
-    static func load(liveURL: URL = liveFileURL,
-                     statusLineURL: URL = statusLineFileURL,
+    static func load(statusLineURL: URL = statusLineFileURL,
                      webURL: URL = webFileURL) -> [AllowanceReading] {
-        [read(liveURL, defaultSource: .anthropicLive),
-         read(statusLineURL, defaultSource: .claudeStatusLine),
-         read(webURL, defaultSource: .claudeWeb)].compactMap { $0 }
+        [read(statusLineURL, source: .claudeStatusLine),
+         read(webURL, source: .claudeWeb)].compactMap { $0 }
     }
 
-    /// Precedence:
-    /// 1. The newest live reading under `liveFreshness` old **that still has a
-    ///    valid window**.
-    /// 2. Otherwise the newest reading of either source that still has a valid
-    ///    window.
-    /// 3. Otherwise the newest reading at all, which the UI shows as "unknown".
-    ///
-    /// Validity is checked first so an expired reading can't hide a usable one.
+    /// The single Claude reading to show. Thin wrapper over the shared rule in
+    /// `ReadingSelection`, kept because Claude only ever has one limit.
     static func choose(_ readings: [AllowanceReading], now: Date) -> AllowanceReading? {
-        let usable = readings.filter { !$0.liveWindows(now: now).isEmpty }
-        // claude.ai can be asked often, so a recent reading from there is the
-        // best answer available.
-        if let web = usable.filter({ $0.source == .claudeWeb })
-            .max(by: { $0.recordedAt < $1.recordedAt }),
-           now.timeIntervalSince(web.recordedAt) <= liveFreshness {
-            return web
-        }
-        let newestLive = usable.filter { $0.source == .anthropicLive }
+        ReadingSelection.choose(provider: .claude, readings: readings, now: now)
             .max { $0.recordedAt < $1.recordedAt }
-        if let newestLive, now.timeIntervalSince(newestLive.recordedAt) <= liveFreshness {
-            return newestLive
-        }
-        return usable.max { $0.recordedAt < $1.recordedAt }
-            ?? readings.max { $0.recordedAt < $1.recordedAt }
     }
 
     /// Parses one reading file:
@@ -74,9 +45,8 @@ enum ClaudeReadings {
     ///       "rate_limits": { "five_hour": { "used_percentage": 38, "resets_at": 1789590000 },
     ///                        "seven_day": { … } } }
     ///
-    /// `recorded_at` is accepted for files written by older builds, and so is
-    /// their `"source": "anthropic-usage-endpoint"` marker.
-    static func read(_ url: URL, defaultSource: ReadingSource) -> AllowanceReading? {
+    /// `recorded_at` is accepted for files written by older builds.
+    static func read(_ url: URL, source: ReadingSource) -> AllowanceReading? {
         guard let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rl = obj["rate_limits"] as? [String: Any],
@@ -99,8 +69,6 @@ enum ClaudeReadings {
         windows.sort { ($0.windowMinutes ?? .max) < ($1.windowMinutes ?? .max) }
         guard !windows.isEmpty else { return nil }
 
-        let source: ReadingSource = (obj["source"] as? String) == "anthropic-usage-endpoint"
-            ? .anthropicLive : defaultSource
         return AllowanceReading(recordedAt: Date(timeIntervalSince1970: stamp),
                                 source: source, planType: nil, windows: windows)
     }

@@ -39,3 +39,7 @@ Cache.db*
 claude.json
 claude-live.json
 last-invoked.json
+claude-web.json
+codex-web.json
+*-raw.json
+debug.log

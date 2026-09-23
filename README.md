@@ -5,8 +5,8 @@ and **ChatGPT (Codex)** limits you have used, and when they reset.
 
 ![Menu bar](docs/images/menubar-dark.png)
 
-> **Early personal-use build.** It works on my Mac and I use it every day, but it
-> hasn't been tested widely yet. Apple silicon, macOS 14 or newer.
+> **Early build.** It works on my Mac and I use it every day, but it hasn't been
+> tested widely yet. Apple silicon, macOS 14 or newer.
 
 ---
 
@@ -24,12 +24,21 @@ So I built my own.
 
 | Logo | Example | Meaning |
 |---|---|---|
-| OpenAI | `55% in 2d 21h` | You used 55% of your weekly **Codex** limit. It resets in 2 days 21 hours. |
+| OpenAI | `86% in 2d 21h` | You used 86% of your weekly **Codex** limit. It resets in 2 days 21 hours. |
 | Claude | `38% in 2h 21m` | You used 38% of your **5-hour** Claude limit. It resets in 2 hours 21 minutes. |
 | Either | `?` | The last number is out of date because the limit has reset since then. It's not shown as 0%. |
 | Either | `—` | No number available yet. |
 
-The logos and text turn white in dark mode and black in light mode.
+The percentage changes color as you use more:
+
+| Used | Color |
+|---|---|
+| under 25% | normal (white in dark mode, black in light mode) |
+| 25–49% | yellow |
+| 50–79% | orange |
+| 80% and up | red |
+
+The logos and countdown always stay in the normal menu bar color.
 
 ### When you click it
 
@@ -42,7 +51,8 @@ The logos and text turn white in dark mode and black in light mode.
 `./scripts/render-screenshots.sh`.)*
 
 Every number shows **where it came from** and **how old it is**, like "From
-claude.ai · 30s ago" or "From Codex logs · recorded 50m ago".
+claude.ai · 30s ago" or "From Codex logs · recorded 50m ago". The panel uses the
+same colors as the menu bar.
 
 The app shows limits only. It does **not** count tokens, and it never reads your
 Claude Code conversations.
@@ -54,30 +64,32 @@ Claude Code conversations.
 ```mermaid
 flowchart LR
     A["claude.ai<br/>(signed in inside the app)"] -->|"every minute"| M["AI Usage Meter<br/>on your Mac"]
-    B["Codex<br/>on your Mac"] -->|"writes usage into<br/>its log files"| M
+    G["chatgpt.com<br/>(signed in inside the app)"] -->|"every minute"| M
+    B["Codex log files<br/>on your Mac"] -->|"backup"| M
     M --> C["Menu bar"]
 ```
 
-- **ChatGPT (Codex):** Codex saves your limit in its log files on your Mac while it
-  runs. The app reads those files. No login and no internet needed.
-- **Claude:** your limit isn't in any local file, so the app asks Claude for it.
-  You sign in to claude.ai once, in a window the app owns, and then it reads your
-  usage **every minute** — the same numbers the Usage screen in the Claude app
-  shows.
+You sign in to claude.ai and chatgpt.com once each, in windows the app owns. The
+app then reads your usage **every minute**, the same numbers each site's own
+Usage page shows. Both limits are account-wide, so use on your phone or another
+computer shows up here too.
 
 There's no server and no extra account. It all runs on your Mac.
 
-### Claude has three sources, best first
+### Sources, best first
 
-| Source | How fresh | Needs |
-|---|---|---|
-| **claude.ai** (normal) | Every minute | Signing in once, in the app's own window |
-| api.anthropic.com (backup) | Every 30 min at most | The login Claude Code already saved |
-| [Claude Code status line](#claude-without-live-checks) (backup) | Only while Claude Code runs in Terminal | A line in your Claude Code settings |
+| Provider | Source | How fresh | Needs |
+|---|---|---|---|
+| Claude | **claude.ai** | Every minute | Signing in once, in the app's own window |
+| Claude | [Claude Code status line](#claude-without-signing-in) (backup) | Only while Claude Code runs in Terminal | A line in your Claude Code settings |
+| ChatGPT | **chatgpt.com** | Every minute | Signing in once, in the app's own window |
+| ChatGPT | Codex log files (backup) | Only when Codex runs on this Mac | Nothing: Codex writes them anyway |
 
-The backup exists because api.anthropic.com **rate-limits** this kind of request
-hard: ask too often and it refuses for up to an hour. claude.ai's own endpoint is
-the one the website itself uses, so it can be asked every minute.
+A backup is only used when the main source has nothing recent. Signing in is
+optional for ChatGPT: without it, the app still works from Codex's logs.
+
+The app never reads anything from your Keychain, so macOS never asks for Keychain
+access.
 
 ---
 
@@ -89,7 +101,6 @@ You need:
   ```bash
   xcode-select --install
   ```
-- **Codex** and/or **Claude Code** installed and logged in
 
 Then:
 
@@ -102,39 +113,30 @@ open "build/AI Usage Meter.app"
 
 You don't need a paid Apple Developer account.
 
-### Sign in to Claude (do this once)
+### Sign in (do this once)
 
-1. Click the menu bar item.
-2. Click **Sign in to Claude for live updates**.
-3. Anthropic's real sign-in page opens in a window this app owns. Sign in with
-   **your email** and the code they send you.
-4. Close that window. The app keeps you signed in and starts reading your usage
-   every minute.
+<img src="docs/images/settings-dark.png" width="340" alt="Settings page with Accounts">
+
+1. Click the menu bar item, then the **⚙** gear.
+2. Under **Accounts**, click **Sign in** next to Claude or ChatGPT.
+3. That site's real sign-in page opens in a window this app owns. Sign in with
+   **your email**.
+4. Once the app gets its first number, the window closes by itself and the
+   numbers update every minute.
 
 > **"Continue with Google" will not work here.** Google refuses to sign you in
 > inside an app window like this one. Use the email option.
 
-The app never sees your password: you type it on Anthropic's own page. See
+The app never sees your password: you type it on the provider's own page. See
 [Is it safe?](#is-it-safe).
 
-### Optional: the backup check
-
-**Check Claude usage live** in the panel uses the login Claude Code already saved
-on your Mac, through api.anthropic.com. It only fills in when claude.ai has no
-recent answer. macOS asks permission the first time:
-
-> **"AI Usage Meter" wants to use your confidential information stored in
-> "Claude Code-credentials" in your keychain.**
-
-Click **Always Allow**, or **Deny** and untick the setting.
-
-To start the app when your Mac starts, tick **Open at login**.
+To start the app when your Mac starts, tick **Open at login** on the same page.
 
 ---
 
-## Claude without live checks
+## Claude without signing in
 
-If you'd rather the app never touch your Claude login, Claude Code can pass your
+If you'd rather not sign in to claude.ai in the app, Claude Code can pass your
 usage to a small script instead. This is an
 [official Claude Code feature](https://code.claude.com/docs/en/statusline).
 
@@ -172,22 +174,21 @@ To undo it, delete the `"statusLine"` part from `~/.claude/settings.json`.
 ```mermaid
 flowchart TB
     subgraph Mac["Your Mac"]
-        W["Sign-in window<br/>(the app's own browser)"] -->|"asks from inside<br/>the signed-in page"| APP["AI Usage Meter"]
-        K["Keychain<br/>(Claude Code login)"] -->|"backup check only,<br/>after you allow"| APP
-        L["Codex and Claude Code<br/>log files"] -->|"reads usage numbers"| APP
+        W["Sign-in windows<br/>(the app's own browser)"] -->|"asks from inside<br/>the signed-in page"| APP["AI Usage Meter"]
+        L["Codex log files"] -->|"reads limit lines only"| APP
     end
-    APP -->|"usage only"| AN["claude.ai and<br/>api.anthropic.com"]
+    APP -->|"usage only"| AN["claude.ai<br/>chatgpt.com"]
     APP -.->|"never"| X["Any other website<br/>analytics or tracking"]
 ```
 
 | Question | Answer |
 |---|---|
-| Does it see my password? | No. You type it on Anthropic's own sign-in page, inside a window the app shows but doesn't read. |
-| Where does my claude.ai session live? | In the app's own browser storage, like any browser. **The app never reads or copies it**: it asks for usage *from inside* the signed-in page, so the page attaches its own cookie. Other apps of this kind lift the cookie out of Safari's or Chrome's cookie database; this one doesn't. |
-| Does it contact the internet? | Only claude.ai (about once a minute, for usage) and api.anthropic.com (backup check). Nothing else, ever. |
+| Does it see my password? | No. You type it on the provider's own sign-in page, inside a window the app shows but doesn't read. |
+| Where do my sessions live? | In the app's own browser storage, like any browser. **The app never reads or copies them**: it asks for usage *from inside* the signed-in page, so the page attaches its own cookie. Other apps of this kind lift the cookie out of Safari's or Chrome's cookie database; this one doesn't. |
+| Does it touch my Keychain? | No. It never reads the Keychain, including Claude Code's saved login. |
+| Does it contact the internet? | Only claude.ai and chatgpt.com, about once a minute each, for usage, and only after you sign in. Nothing else, ever. |
 | Does it read my chats? | **It never opens Claude Code's logs.** It reads Codex's logs, which do hold your Codex conversations, but only looks at lines carrying the limit numbers and saves only those. |
 | Does it track me? | No. No analytics, no tracking, no crash reports. |
-| Does it need my OpenAI login? | No. ChatGPT numbers come from Codex's files on your Mac. |
 | How do I sign out? | Open the sign-in window and sign out there, or delete `~/Library/Application Support/AIUsageMeter/`. |
 
 Full details: [SECURITY.md](SECURITY.md).
@@ -200,37 +201,23 @@ Full details: [SECURITY.md](SECURITY.md).
 It's the Codex usage limit that comes with your ChatGPT plan. Normal chats on
 chatgpt.com have their own limits, which aren't shown here.
 
-**ChatGPT numbers only update when you use Codex.**
-Codex only writes to its files while it runs. The panel always shows how old the
-number is.
+**Both numbers cover every device once you sign in.**
+Claude's limit is shared by claude.ai, the phone app, the desktop app and Claude
+Code; the Codex limit is shared across machines. Signed in, this Mac shows use from
+anywhere within a minute.
 
-**The Claude number covers every device.**
-claude.ai, the phone app, the desktop app and Claude Code share one limit, and the
-app asks your account directly. Use Claude on your phone and this Mac shows it
-within a minute.
-
-**The ChatGPT number only updates when Codex runs on this Mac.**
-That limit is account-wide too, but the app learns it from Codex's log files here.
-Use Codex on another machine and this Mac won't know until Codex next runs on it.
-The card always shows how old the number is.
+**Without the ChatGPT sign-in, that number only updates when Codex runs here.**
+Codex writes its limit to log files on this Mac only while it runs. The card
+always shows how old the number is.
 
 **It never guesses.**
-The app shows only percentages Claude or OpenAI reported. It doesn't count tokens
-or work a percentage out for itself. With no real number, it says "unavailable".
+The app shows only percentages Anthropic or OpenAI reported. It doesn't count
+tokens or work a percentage out for itself. With no real number, it says
+"unavailable".
 
-**Claude's numbers come from claude.ai's own usage address.**
-It isn't a published API, so it could change one day. If it does, the app falls
+**The website addresses aren't published APIs.**
+claude.ai and chatgpt.com could change them one day. If they do, the app falls
 back to the other sources and says where each number came from.
-
-**The backup check uses an unofficial Anthropic address.**
-Anthropic hasn't published it, so it could stop working one day. If that happens,
-the panel shows an error instead of a wrong number.
-
-**Anthropic limits how often that address can be asked.**
-Ask too often and it answers "rate limited" for a while — once, it asked for a
-41-minute wait. So the app asks rarely (see the table above), waits exactly as
-long as the server says, and keeps showing the last number with its age. Press ⟳
-only when you really want a fresh number.
 
 **A number disappears when it gets too old.**
 Anthropic doesn't always send a reset time for the 5-hour window (it leaves it out
@@ -243,15 +230,10 @@ app drops it rather than show a stale 0%.
 
 | What you see | What to do |
 |---|---|
-| "Continue with Google" shows a sign-in error | Google blocks sign-in inside app windows. Use **Continue with email**. |
-| Claude says "Sign in to Claude…" again | The claude.ai session expired. Click it and sign in once more. |
-| The Keychain popup shows up again | It happens after every rebuild of the app. It's only for the backup check. Click **Always Allow**, or untick **Check Claude usage live**. |
-| "Keychain access was declined" | Press ⟳ and click **Always Allow**, or untick **Check Claude usage live**. |
-| "Claude Code login not found" | Log in to Claude Code first. |
-| "Claude login expired" | Open Claude Code once. It refreshes the login by itself. |
-| Claude says "Usage unavailable" | Turn on **Check Claude usage live**, or set up [the status line](#claude-without-live-checks). |
-| ChatGPT number is old, or shows `?` | Normal. Use Codex once and it updates. |
-| "Anthropic is limiting usage checks" | You've hit Anthropic's limit on usage checks. The app retries by itself at the time it names. |
+| "Continue with Google" shows a sign-in error | Google blocks sign-in inside app windows. Use the email option. |
+| An account shows **Sign in** again | That site's session expired. Click **Sign in** and sign in once more. |
+| Claude says "Usage unavailable" | Sign in to Claude under ⚙ → Accounts, or set up [the status line](#claude-without-signing-in). |
+| ChatGPT number is old, or shows `?` | Sign in to ChatGPT under ⚙ → Accounts, or use Codex once and it updates. |
 | Claude's 5-hour row is missing | The last reading is older than 5 hours, so it can't be trusted. It returns at the next successful check. |
 | Numbers are a bit different from another app | Compare how old each number is. Numbers taken minutes apart differ. |
 | Doesn't open at login after moving the app | Untick and tick **Open at login** again. |
@@ -263,9 +245,8 @@ app drops it rather than show a stale 0%.
 
 | What | How |
 |---|---|
-| Claude numbers | **Sign in to Claude for live updates** in the panel |
-| Backup check via Claude Code's login | **Check Claude usage live** in the panel (off by default) |
-| Start at login | **Open at login** in the panel |
+| Live Claude and ChatGPT numbers | ⚙ → **Accounts** → **Sign in** |
+| Start at login | ⚙ → **Open at login** |
 | Show your Claude plan name | `defaults write local.aiusagemeter claudePlanLabel "Pro"` |
 | Start fresh | Quit the app, then run `./build/AIUsageMeter --scan --rebuild`, or delete `~/Library/Application Support/AIUsageMeter/`. Open it again. |
 
@@ -277,10 +258,10 @@ app drops it rather than show a stale 0%.
 |---|---|
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Build, test, the rules every change follows |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the code is organized and how data flows |
-| [docs/DATA-SOURCES.md](docs/DATA-SOURCES.md) | The exact files, fields and address the app uses |
+| [docs/DATA-SOURCES.md](docs/DATA-SOURCES.md) | The exact files, fields and addresses the app uses |
 | [SECURITY.md](SECURITY.md) | What the app touches and how it keeps it safe |
 | [assets/README.md](assets/README.md) | Icons, logos and how to rebuild the app icon |
-| [docs/OPEN-SOURCE-CHECKLIST.md](docs/OPEN-SOURCE-CHECKLIST.md) | Things to decide before making this public |
+| [docs/OPEN-SOURCE-CHECKLIST.md](docs/OPEN-SOURCE-CHECKLIST.md) | Things to do before making this public |
 
 Quick commands:
 

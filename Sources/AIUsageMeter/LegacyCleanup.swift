@@ -20,4 +20,12 @@ enum LegacyCleanup {
                 + "~/Library/Caches/local.aiusagemeter yourself (see SECURITY.md)."
         }
     }
+
+    /// Earlier builds had a backup check that saved api.anthropic.com readings to
+    /// `statusline/claude-live.json`. Nothing reads that file any more, so it is
+    /// removed rather than left to go stale.
+    static func removeLegacyLiveReading() {
+        try? FileManager.default.removeItem(
+            at: ClaudeReadings.directory.appendingPathComponent("claude-live.json"))
+    }
 }

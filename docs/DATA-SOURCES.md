@@ -1,8 +1,8 @@
 # Data sources
 
-The exact files, fields and address the app depends on, and how much each can be
-trusted. Check here first when numbers look wrong after a Claude Code, Codex or
-Anthropic update.
+The exact files, fields and addresses the app depends on, and how much each can be
+trusted. Check here first when numbers look wrong after a Claude Code, Codex,
+claude.ai or chatgpt.com update.
 
 ```mermaid
 flowchart LR
@@ -10,24 +10,25 @@ flowchart LR
         SL["Claude Code status line"]
     end
     subgraph Undocumented["Undocumented (may change)"]
-        AN["Anthropic /api/oauth/usage"]
+        CW["claude.ai usage endpoint"]
+        GW["chatgpt.com usage endpoint"]
         CXL["Codex session logs"]
-        CCL["Claude Code session logs"]
     end
-    AN -->|"Claude %"| M["AI Usage Meter"]
-    SL -->|"Claude %"| M
-    CXL -->|"Codex % + tokens"| M
-    CCL -->|"tokens"| M
+    CW -->|"Claude %"| M["AI Usage Meter"]
+    SL -->|"Claude %, backup"| M
+    GW -->|"Codex %"| M
+    CXL -->|"Codex %, backup"| M
 ```
 
 | Source | Documented? | Needs a login | Network | Used for |
 |---|---|---|---|---|
 | claude.ai `/api/organizations/{id}/usage` | **No** | claude.ai sign-in, in the app's window | Yes | Claude % (the normal source) |
-| Anthropic `/api/oauth/usage` | **No** | Claude Code login | Yes | Claude %, backup |
-| Claude Code status line `rate_limits` | **Yes** | No | No | Claude %, optional |
-| Codex session logs `rate_limits` | No, internal log format | No | No | Codex % |
-| Codex session logs `token_usage_record` | No, internal log format | No | No | Codex tokens |
-| Claude Code session logs `usage` | No, internal log format | No | No | Claude Code tokens |
+| Claude Code status line `rate_limits` | **Yes** | No | No | Claude %, backup |
+| chatgpt.com `/backend-api/wham/usage` | **No** | chatgpt.com sign-in, in the app's window | Yes | Codex % (the normal source) |
+| Codex session logs `rate_limits` | No, internal log format | No | No | Codex %, backup |
+
+The app does **not** read Claude Code's session logs, count tokens, or read the
+Keychain.
 
 Observed with Claude Code 2.1.231–2.1.270 and Codex CLI logs from September 2026.
 
@@ -57,7 +58,7 @@ Real reply, keys and types only (values invented):
 }
 ```
 
-What the parser does with it (`ClaudeWebSource`):
+What the parser does with it (`WebUsageSource`):
 
 - `utilization` is 0–100; `resets_at` is an ISO 8601 string (or null).
 - **Only real windows are kept:** one the app can name (`five_hour`, `seven_day`)
@@ -77,64 +78,54 @@ never cookies or page content.
 
 ---
 
-## Anthropic usage endpoint (backup)
+## chatgpt.com website endpoints (the normal Codex source)
 
-Only used when **Check Claude usage live** is on.
-
-**It is rate-limited.** Asking every 5 minutes tripped it; the server then replied
-`{"error":{"type":"rate_limit_error"}}` with `Retry-After: 2493`. The app sends a
-`User-Agent` naming itself, asks at most once every 10 minutes, and waits exactly
-as long as `Retry-After` says (or 15 → 30 → 60 minutes when no header is sent).
-Check it by hand with `./build/AIUsageMeter --check-claude`, which prints the
-status, rate-limit headers and the server's error text, never the login.
+Called from **inside** the app's signed-in page. The site's own pages get a
+short-lived bearer token from `/api/auth/session` and send it to `/backend-api`;
+the app's script does the same, inside the page, so the token never leaves it and
+nothing is stored:
 
 ```
-GET https://api.anthropic.com/api/oauth/usage
-Authorization: Bearer <claudeAiOauth.accessToken>
-anthropic-beta: oauth-2025-04-20
+GET https://chatgpt.com/api/auth/session       → { "accessToken": "…" }  (stays in the page)
+GET https://chatgpt.com/backend-api/wham/usage → the usage below
 ```
 
-**Credential:** macOS Keychain generic password, service `Claude Code-credentials`.
-Its data is JSON:
-
-```json
-{ "claudeAiOauth": { "accessToken": "…", "refreshToken": "…", "expiresAt": 0, "…": "…" } }
-```
-
-Only `accessToken` is used. The app never refreshes the token; Claude Code does.
-
-**Response fields used:**
+Relevant part of the reply, keys and types only (values invented):
 
 ```json
 {
-  "five_hour": { "utilization": 38.0, "resets_at": "2026-09-16T19:40:00.000000+00:00" },
-  "seven_day": { "utilization": 63.0, "resets_at": "2026-09-17T21:00:00.000000+00:00" }
+  "rate_limits": {
+    "primary_window":   { "used_percent": 61, "limit_window_seconds": 604800,
+                          "reset_after_seconds": 500000, "reset_at": 1800500000 },
+    "secondary_window": { "used_percent": 12, "limit_window_seconds": 18000,
+                          "reset_at": 1800000000 }
+  }
 }
 ```
 
-- `utilization` is 0–100.
-- `resets_at` is ISO 8601, possibly with microseconds, which
-  `ISO8601DateFormatter` rejects. The parser strips the fraction as a fallback.
-  Epoch numbers are also accepted.
-- Other keys may appear and are ignored.
+What the parser does with it (`WebUsageSource`, same code as claude.ai):
 
-**Failure mapping** (`ClaudeLiveUsage.Failure`):
+- Windows are named by **rank** (`primary_window`, `secondary_window`), not by
+  length, just like the Codex logs. The length comes from `limit_window_seconds`;
+  the rank is never shown as a limit name.
+- `reset_at` (epoch seconds) is preferred; `reset_after_seconds` (seconds from
+  now) is the fallback.
+- The raw reply is saved to `statusline/chatgpt-web-raw.json` and the reading to
+  `statusline/codex-web.json`. Neither holds the token or a cookie.
 
-| Situation | Case | What happens |
-|---|---|---|
-| No Keychain item | `noCredential` | Message asks you to log in to Claude Code |
-| You clicked Deny | `accessDeclined` | Live checks pause until ⟳ or the setting is toggled |
-| Item isn't the expected JSON | `badCredential` | Message shown |
-| HTTP 401 | `http(401)` | "login expired" |
-| Other HTTP status, network error, unexpected reply | `http` / `network` / `badResponse` | Message shown |
+### How the Codex sources are combined
 
-**Saved to** `~/Library/Application Support/AIUsageMeter/statusline/claude-live.json`:
+Same rule as Claude: a chatgpt.com reading under 15 minutes old with a valid
+window wins, even over a newer log line; otherwise the newest valid reading wins.
+See `ReadingSelection.choose`.
 
-```json
-{ "received_at": 1789580000.0,
-  "rate_limits": { "five_hour": { "used_percentage": 38, "resets_at": 1789590000 },
-                   "seven_day": { "used_percentage": 63, "resets_at": 1789750000 } } }
-```
+## Removed: Anthropic usage endpoint
+
+Earlier builds had an optional backup check that read Claude Code's login from the
+Keychain and asked `api.anthropic.com/api/oauth/usage`. It was removed: claude.ai
+covers the same need without Keychain access. A leftover
+`statusline/claude-live.json` from those builds is deleted at launch
+(`LegacyCleanup.removeLegacyLiveReading`).
 
 ## Claude Code status line
 
@@ -167,21 +158,19 @@ pseudo-terminal with zero rows or columns also draws nothing.
 `scripts/claude-statusline.py` writes two files in
 `~/Library/Application Support/AIUsageMeter/statusline/`:
 
-- `claude.json`, same shape as `claude-live.json` above. `received_at` is when
+- `claude.json`, with `received_at` and `rate_limits` (`five_hour` / `seven_day`, each `used_percentage` and `resets_at`). `received_at` is when
   the script received the figure, not when Anthropic produced it. It's only
   written when `rate_limits` is present, so a good reading is never replaced by an
   empty one.
 - `last-invoked.json`, written on every run, with or without `rate_limits`. It
   tells "never invoked" apart from "invoked without usage data".
 
-Files from older builds used `recorded_at`, and live readings were marked
-`"source": "anthropic-usage-endpoint"` inside `claude.json`. Both still load.
+Files from older builds used `recorded_at` instead of `received_at`; they still load.
 
-### How the three Claude sources are combined
+### How the Claude sources are combined
 
 Only readings that still have a valid (not yet reset) window can win. Among those,
-claude.ai wins if it is under 15 minutes old, then api.anthropic.com under 15
-minutes, then whichever is newest. If none is valid, the newest is shown as
+claude.ai wins if it is under 15 minutes old, then whichever is newest. If none is valid, the newest is shown as
 "unknown". This is decided each time the screen is drawn, so a reading that goes
 stale stops winning without a rescan. See `ClaudeReadings.choose` and
 [ARCHITECTURE.md](ARCHITECTURE.md#claude-two-sources-one-choice).
@@ -237,58 +226,6 @@ Known `plan_type` values and display names (`UsagePanel.planLabel`):
 | `plus` | Plus |
 | `team` | Team |
 | other | raw value |
-
-### Tokens
-
-```json
-{
-  "timestamp": "2026-09-13T18:58:23.280Z",
-  "type": "token_usage_record",
-  "payload": {
-    "usage": {
-      "input_tokens": 30899,
-      "cached_input_tokens": 19456,
-      "cache_write_input_tokens": 0,
-      "output_tokens": 260,
-      "reasoning_output_tokens": 0,
-      "total_tokens": 31159
-    }
-  }
-}
-```
-
-`input_tokens` **includes** `cached_input_tokens`, so the parser stores
-`input - cached` as input and `cached` as cache-read to avoid double counting.
-
-## Claude Code session logs
-
-Location: `~/.claude/projects/<escaped-project-path>/<session-id>.jsonl`.
-
-Assistant lines carry usage:
-
-```json
-{
-  "type": "assistant",
-  "timestamp": "2026-09-15T21:49:05.961Z",
-  "message": {
-    "model": "claude-opus-5",
-    "usage": {
-      "input_tokens": 2,
-      "cache_creation_input_tokens": 35391,
-      "cache_read_input_tokens": 44116,
-      "output_tokens": 977
-    }
-  }
-}
-```
-
-Mapping: `input_tokens` → input, `output_tokens` → output,
-`cache_read_input_tokens` → cacheRead, `cache_creation_input_tokens` → cacheWrite.
-
-These logs contain **no** allowance or limit information.
-
-Coverage: only Claude Code sessions on this Mac write here, whether terminal,
-desktop "Code" or IDE. claude.ai web and mobile chats don't.
 
 ## When a format changes
 

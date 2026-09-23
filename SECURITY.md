@@ -1,8 +1,8 @@
 # Security
 
-This app is close to private stuff: Codex's logs, a signed-in claude.ai session,
-and (for the backup check) your Claude Code login. It does **not** read Claude
-Code's logs at all. This page explains what it touches, why, and
+This app is close to private stuff: Codex's logs and signed-in claude.ai and
+chatgpt.com sessions.
+It does **not** read Claude Code's logs or your Claude Code login at all. This page explains what it touches, why, and
 how it keeps things safe. It also lists what it **can't** promise.
 
 ---
@@ -29,31 +29,33 @@ flowchart TB
         direction TB
         C2["Codex logs<br/>~/.codex/sessions"] -->|"read: limit lines only"| APP
         SL["Status line file<br/>(optional script)"] -->|"read"| APP
-        WV["The app's own browser<br/>(your claude.ai session)"] -->|"asks from inside<br/>the signed-in page"| APP
-        K["Keychain<br/>Claude Code-credentials"] -->|"backup check only,<br/>after you allow"| APP
+        WV["The app's own browser<br/>(your claude.ai and chatgpt.com sessions)"] -->|"asks from inside<br/>the signed-in page"| APP
         APP["AI Usage Meter"] -->|"saves numbers only"| S["~/Library/Application Support/AIUsageMeter<br/>(only your user can open it)"]
     end
-    APP ==>|"usage requests"| A["claude.ai<br/>api.anthropic.com"]
+    APP ==>|"usage requests"| A["claude.ai<br/>chatgpt.com"]
 ```
 
 | Thing | What the app does | When |
 |---|---|---|
 | Codex logs `~/.codex/sessions` | Reads lines carrying `rate_limits` | Always |
 | Claude Code logs `~/.claude/projects` | **Never opened** | — |
-| `https://claude.ai/api/organizations…` | Sends a request from inside the signed-in page | About once a minute, once you sign in |
-| The claude.ai session cookie | **Never reads it.** It stays in the app's browser storage, which attaches it automatically | — |
-| Keychain item `Claude Code-credentials` | Reads | Backup check only: when **Check Claude usage live** is on and you click Allow |
-| `https://api.anthropic.com/api/oauth/usage` | Sends a request | Backup check only: when you open the panel, every 30 min, and on ⟳ — at most once per 10 min |
+| `https://claude.ai/api/organizations…` | Sends a request from inside the signed-in page | About once a minute, only after you click **Sign in** for Claude |
+| `https://chatgpt.com/api/auth/session`, `/backend-api/wham/usage` | Sends requests from inside the signed-in page | About once a minute, only after you click **Sign in** for ChatGPT |
+| Session cookies for both sites | **Never reads them.** They stay in the app's browser storage, which attaches them automatically | — |
+| chatgpt.com's short-lived access token | Used **inside the page only**, the same way chatgpt.com's own pages use it. Never returned to the app, saved or logged | Each ChatGPT usage check |
+| Keychain (including `Claude Code-credentials`) | **Never opened.** macOS never shows a Keychain prompt for this app | — |
 | `~/Library/Application Support/AIUsageMeter/` | Reads and writes | Always. Folder mode `0700`. Holds the cache, reading files and `instance.lock` |
 | `~/Library/Caches/local.aiusagemeter/` | **Deletes** | At launch, if present. It's the request cache left by early builds (see Past issues) |
+| `statusline/claude-live.json` | **Deletes** | At launch, if present. Left by earlier builds' removed backup check |
 
 ### What the app never does
 
-- ❌ See your password: you type it on Anthropic's own page
-- ❌ Read, copy or store the claude.ai session cookie
+- ❌ See your password: you type it on the provider's own page
+- ❌ Read, copy or store a session cookie or access token
 - ❌ Read cookies from Safari, Chrome or any other browser
 - ❌ Open your OpenAI login (`~/.codex/auth.json`)
-- ❌ Contact any website except `claude.ai` and `api.anthropic.com`
+- ❌ Read anything from the Keychain
+- ❌ Contact any website except `claude.ai` and `chatgpt.com`, and those only after you sign in
 - ❌ Run commands or start other programs
 - ❌ Send analytics, tracking or crash reports
 - ❌ Change Claude Code's or Codex's own files
@@ -69,10 +71,11 @@ lsof -nP -a -p "$(pgrep -f 'AI Usage Meter.app/Contents/MacOS')" -i
 
 ---
 
-## Signing in to claude.ai
+## Signing in to claude.ai and chatgpt.com
 
-The app shows Anthropic's own sign-in page in a window it owns (a `WKWebView`),
-and afterwards asks claude.ai for your usage.
+The app shows each provider's own sign-in page in a window it owns (a
+`WKWebView`), and afterwards asks that site for your usage. claude.ai is shown
+below; chatgpt.com works the same way.
 
 ```mermaid
 sequenceDiagram
@@ -95,8 +98,11 @@ Why it is built this way:
    `fetch()`, so the web view attaches its own cookie. Other apps of this kind
    read the cookie out of Safari's or Chrome's cookie database; this one never
    touches another app's storage.
-2. **Your password never reaches the app.** It is typed on Anthropic's page.
-3. **Only numbers come back** — the percentages and reset times.
+2. **Your password never reaches the app.** It is typed on the provider's own page.
+3. **Only numbers come back** — the percentages and reset times. chatgpt.com's
+   usage call needs a bearer token, which the site hands to its own pages at
+   `/api/auth/session`. The script fetches it and uses it *inside the page*, then
+   returns only the usage reply, so the token never reaches the app.
 4. **Signing out inside the window removes the session**, as does deleting
    `~/Library/Application Support/AIUsageMeter/`.
 
@@ -105,55 +111,11 @@ Why it is built this way:
 - **A signed-in session is sensitive.** Anyone who can run programs as your Mac
   user could use the app's browser storage, exactly as they could use Safari's.
 - **Check the address before typing a password.** The window shows a real web
-  page; it should be Anthropic's. This app only ever loads `claude.ai` there.
+  page; it should be the provider's. This app only ever loads `claude.ai` and
+  `chatgpt.com` there.
 - **"Continue with Google" will not work.** Google blocks sign-in inside embedded
   windows.
 - **These website endpoints are not a published API**, so they may change.
-
----
-
-## The backup check (api.anthropic.com)
-
-This is the most sensitive part, so here is exactly what happens.
-
-```mermaid
-sequenceDiagram
-    participant You
-    participant App as AI Usage Meter
-    participant KC as macOS Keychain
-    participant A as api.anthropic.com
-
-    You->>App: Tick "Check Claude usage live"
-    App->>KC: Read Claude Code's login
-    KC->>You: Popup: allow?
-    You->>KC: Always Allow
-    KC->>App: Login
-    App->>A: What is this account's usage?
-    A->>App: 5-hour 38%, weekly 63%
-    Note over App: Saves only the percentages<br/>and reset times
-```
-
-The rules in the code (`ClaudeLiveUsage.swift`):
-
-1. **Off by default.** Nothing reads the login until you turn the setting on.
-2. **You approve.** macOS asks before the app can read the login. If you click
-   Deny, the app pauses live checks instead of asking again every 5 minutes.
-3. **Not saved on purpose.** The login is read for each check, sent with that one
-   request, and never intentionally written to a file, logged, or shown in an
-   error. *Limitation:* Swift gives no control over when that memory is cleared,
-   so it may stay in the app's memory for a while.
-4. **Nothing cached.** Requests use a private ("ephemeral") mode with the disk
-   cache, cookies and saved credentials turned off.
-5. **No redirects.** If a server replies "go somewhere else", the app refuses, so
-   the login can't be forwarded to another site.
-6. **One fixed address.** The login only ever goes to
-   `https://api.anthropic.com/api/oauth/usage`, written directly in the code.
-7. **Numbers only.** From the reply, only percentages and reset times are kept.
-
-### ⚠️ This login can do more than read usage
-
-It's Claude Code's own login, not a special read-only key. That's why the rules
-above are strict, and why the setting is off until you choose it.
 
 ---
 
@@ -191,8 +153,8 @@ readable by your Mac user.
 `~/Library/Caches/local.aiusagemeter/Cache.db`, **including the login header**.
 Only your Mac user could read it, but it shouldn't have been there.
 
-**Fix:** the app now uses a private request mode that saves nothing. See rule 4
-above. Current builds also **delete that old cache folder automatically at
+**Fix:** that login-based check was later removed entirely; the app no longer
+reads the Claude Code login at all. Current builds also **delete that old cache folder automatically at
 launch**, without reading it. If deleting fails, the panel shows a message.
 
 **To remove it by hand** (for example, if you won't run a newer build):
@@ -210,24 +172,22 @@ login. Logins also expire on their own.
 
 | Risk | What it means |
 |---|---|
-| Website endpoints are unofficial | claude.ai could change them. Numbers would stop updating; nothing becomes unsafe. |
-| A signed-in session sits in the app's storage | Same exposure as being signed in to claude.ai in a browser on this Mac. Sign out in the window to remove it. |
-| Login stays in memory | See rule 3. Anything able to read this app's memory already runs as you. |
+| Website endpoints are unofficial | claude.ai or chatgpt.com could change them. Numbers would stop updating; nothing becomes unsafe. |
+| A signed-in session sits in the app's storage | Same exposure as being signed in to those sites in a browser on this Mac. Sign out in the window to remove it. |
 | Not signed by Apple | Fine when you build it yourself. Downloads you share should be signed and notarized. |
-| "Always Allow" persists | It's tied to that exact build. Each rebuild asks again. |
-| Malware on your Mac | Anything running as your user can already read these files and ask for the same Keychain item. This app neither adds nor removes that risk. |
+| Malware on your Mac | Anything running as your user can already read these files and your browser sessions. This app neither adds nor removes that risk. |
 
 ---
 
 ## Checklist before every release
 
-- [ ] `grep -rn "URLSession.shared" Sources/` finds only the comment explaining why it's avoided
-- [ ] `grep -rn "https://" Sources/` finds only `api.anthropic.com`
-- [ ] Nothing logs the login or request headers: `grep -rn "print\|NSLog\|os_log" Sources/`
+- [ ] `grep -rn "https://" Sources/` finds only `claude.ai` and `chatgpt.com`
+- [ ] Nothing logs cookies or request headers: `grep -rn "print\|NSLog\|os_log" Sources/`
 - [ ] No personal info or tokens:
       `grep -rnIE "sk-ant|Bearer [A-Za-z0-9]|/Users/[a-z]|@gmail" --exclude-dir=build --exclude-dir=.build --exclude=SECURITY.md .`
-- [ ] With live check on, after launch and a refresh, `~/Library/Caches/local.aiusagemeter/` does **not** exist
-- [ ] With live check off and no claude.ai sign-in, `lsof` (above) shows no connections
+- [ ] After launch and a refresh, `~/Library/Caches/local.aiusagemeter/` does **not** exist
+- [ ] On a fresh install, before clicking any **Sign in**, `lsof` (above) shows no connections
+- [ ] No Keychain access: `grep -rn "SecItem\|import Security" Sources/` finds nothing
 - [ ] The app never reads the cookie itself:
       `grep -rn "HTTPCookie\|cookieStore\|binarycookies" Sources/` finds nothing
 - [ ] `debug.log` records events only — no cookies, tokens or page content

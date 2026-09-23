@@ -8,7 +8,7 @@ The app repeats 3 steps:
 
 ```mermaid
 flowchart LR
-    G["1. Gather<br/>read logs, reading files,<br/>optional live check"] --> S["2. Save<br/>small SQLite cache"] --> D["3. Show<br/>menu bar + panel"]
+    G["1. Gather<br/>read logs, reading files,<br/>ask signed-in websites"] --> S["2. Save<br/>small SQLite cache"] --> D["3. Show<br/>menu bar + panel"]
     D -.->|"something changes"| G
 ```
 
@@ -19,18 +19,19 @@ flowchart LR
     subgraph Sources
         CX["Codex logs<br/>~/.codex/sessions"]
         WEB["claude.ai<br/>(signed-in web view)"]
-        AN["Anthropic<br/>/api/oauth/usage"]
+        GPT["chatgpt.com<br/>(signed-in web view)"]
         SL["Claude Code status line<br/>scripts/claude-statusline.py"]
     end
 
     CX -->|"Codex limit"| IDX["UsageIndex"]
-    WEB -->|"ClaudeWebSource"| F0["statusline/claude-web.json"]
-    AN -->|"ClaudeLiveUsage"| F1["statusline/claude-live.json"]
+    WEB -->|"WebUsageSource"| F0["statusline/claude-web.json"]
+    GPT -->|"WebUsageSource"| F1["statusline/codex-web.json"]
     SL --> F2["statusline/claude.json"]
     F0 --> CR["ClaudeReadings"]
-    F1 --> CR
     F2 --> CR
+    F1 --> XR["CodexReadings"]
     CR --> IDX
+    XR --> IDX
     IDX <--> DB[("SQLite cache")]
     IDX --> R["UsageReport"]
     R --> MB["Menu bar"]
@@ -42,13 +43,11 @@ flowchart LR
 ```mermaid
 flowchart LR
     T1["A watched file changes"] --> W["FileWatcher<br/>waits 2 s for quiet"]
-    T0["Every 60 s<br/>(signed in to claude.ai)"] --> WEBC["ClaudeWebSession"]
-    WEBC -->|"writes claude-web.json"| W
-    T2["Every 30 min<br/>(backup check on)"] --> L["ClaudeLiveUsage"]
-    T3["⟳ button"] --> L
-    T3 -.->|"live check off"| U
+    T0["Every 60 s<br/>(each signed-in site)"] --> WEBC["WebSession"]
+    WEBC -->|"writes claude-web.json<br/>or codex-web.json"| W
+    T3["⟳ button"] --> WEBC
+    T3 --> U
     T4["Mac wakes"] --> U
-    L -->|"writes claude-live.json"| W
     W --> U["UsageStore.refresh()"]
     U --> I["UsageIndex pass"]
     I --> RD["Redraw"]
@@ -64,7 +63,7 @@ to `?` without waiting for new data.
 ## Rules the design follows
 
 1. **Never invent a limit.** A percentage appears only if Anthropic or OpenAI
-   reported it. Token counts are shown separately and never converted.
+   reported it. The app counts no tokens and computes no percentages.
 2. **Readings are snapshots.** Every reading keeps when it was recorded and where
    it came from.
 3. **Expired isn't zero.** Expiry is checked at display time against the current
@@ -72,10 +71,10 @@ to `?` without waiting for new data.
    "unknown" (`?`).
 4. **Read only what's new.** Logs run to hundreds of MB. After the first pass,
    only appended bytes are read.
-5. **Totals and offsets move together.** Token counts and "how far each file was
+5. **Readings and offsets move together.** Readings and "how far each file was
    read" are saved in the same transaction, or not at all.
-6. **Nothing online unless asked.** The only network use is the opt-in live Claude
-   check.
+6. **Nothing online unless asked.** The only network use is the signed-in
+   website pages you chose to sign in to. The Keychain is never read.
 
 ---
 
@@ -84,22 +83,22 @@ to `?` without waiting for new data.
 | File | Job |
 |---|---|
 | `main.swift` | Entry point. `--scan` prints results; otherwise `AppController` runs the menu bar item and popover |
-| `UsageStore.swift` | Main-actor state: schedules index passes, watchers, timers, live checks; settings; menu bar text |
+| `UsageStore.swift` | Main-actor state: schedules index passes, watchers, timers, website checks; settings; menu bar text |
 | `UsageIndex.swift` | One index pass: ingest (transaction) → build `UsageReport` |
 | `Database.swift` | SQLite wrapper and schema. All writes throw on failure |
 | `LogParser.swift` | Protocol shared by the log parsers |
 | `CodexParser.swift` | Codex logs → limit readings (all windows, with `limit_id`) |
-| `ClaudeReadings.swift` | Loads the three Claude reading files; decides which one to show |
-| `ClaudeWebSession.swift` | The app's own browser: sign-in window, and usage calls made *inside* the signed-in claude.ai page |
-| `ClaudeWebSource.swift` | Turns claude.ai's reply into `claude-web.json` |
-| `ClaudeLiveUsage.swift` | Backup: Keychain login → api.anthropic.com → `claude-live.json` |
+| `ClaudeReadings.swift` | Loads the Claude reading files; decides which one to show |
+| `CodexReadings.swift` | Loads the chatgpt.com reading file |
+| `WebSession.swift` | The app's own browser, one per site (claude.ai, chatgpt.com): sign-in window, and usage calls made *inside* the signed-in page |
+| `WebUsageSource.swift` | Turns either site's reply into a reading file (`claude-web.json`, `codex-web.json`) |
 | `LineReader.swift` | Streaming line reader, byte keyword search, JSON helpers, file discovery |
 | `InstanceLock.swift` | One running copy at a time; `--rebuild` can't run under the app |
-| `LegacyCleanup.swift` | Removes the request cache earlier builds left behind |
+| `LegacyCleanup.swift` | Removes files earlier builds left behind (request cache, `claude-live.json`) |
 | `FileWatcher.swift` | FSEvents wrapper with a 2-second debounce |
 | `Models.swift` | Data types, display decisions, formatting |
 | `UsagePanel.swift` | SwiftUI panel and provider cards |
-| `ProviderIcons.swift` | Loads the logo SVGs; draws the menu bar label as one template image |
+| `ProviderIcons.swift` | Loads the logo SVGs; draws the menu bar label, colouring each percentage by `UsageBand` |
 
 Other code:
 
@@ -125,7 +124,6 @@ classDiagram
     class ProviderReading {
         provider: Provider
         readings: [AllowanceReading]
-        last5Hours / last7Days: TokenTotals
         display(now) AllowanceDisplay
     }
     class AllowanceReading {
@@ -146,9 +144,9 @@ classDiagram
     AllowanceReading --> AllowanceWindow
 ```
 
-**`ReadingSource`**: `anthropicLive`, `claudeStatusLine`, `codexLog`. The UI
-describes each one differently ("Checked with Anthropic", "From Claude Code status
-line · received", "From Codex logs · recorded").
+**`ReadingSource`**: `claudeWeb`, `chatgptWeb`, `claudeStatusLine`, `codexLog`.
+The UI describes each one differently ("From claude.ai", "From chatgpt.com", "From
+Claude Code status line · received", "From Codex logs · recorded").
 
 **`ProviderReading.display(now:)`** returns:
 - `.available(headline, others, reading)`: at least one window still valid
@@ -160,6 +158,10 @@ limit id**. For Codex, every candidate's valid windows are pooled, so a newer
 reading for one limit can't hide another. For Claude, one reading is chosen at
 display time by `ClaudeReadings.choose`.
 
+**Usage colour** (`ProviderIcons.UsageBand`), shared by the menu bar and panel,
+from the rounded percentage: under 25% plain, 25–49% yellow, 50–79% orange,
+80%+ red.
+
 **Headline window** (`Provider.headline`):
 - Claude: the 5-hour window if it's still valid, otherwise the shortest valid one.
 - Codex: the valid window closest to its limit, since that's the one that would
@@ -167,37 +169,30 @@ display time by `ClaudeReadings.choose`.
 
 ---
 
-## Claude: three sources, one choice
+## Claude: two sources, one choice
 
-### Why three
+### Why two
 
-`api.anthropic.com/api/oauth/usage` is rate-limited hard — asking every 5 minutes
-earned `rate_limit_error` with `Retry-After: 2493`. claude.ai's own endpoints are
-a different backend, the one the website polls itself, so they can be asked every
-minute. The website route is therefore the normal source and the other two are
-backups.
+claude.ai's own endpoints are the ones the website polls itself, so they can be
+asked every minute. That is the normal source; the status line is the backup for
+people who don't sign in. (Earlier builds also read Claude Code's Keychain login
+to ask `api.anthropic.com/api/oauth/usage`, which is rate-limited hard. That was
+removed, and a leftover `claude-live.json` is deleted at launch.)
 
 Each source has its own file, so none can overwrite another:
 
 | File | Written by | Timestamp means |
 |---|---|---|
-| `statusline/claude-web.json` | `ClaudeWebSource` | When the app asked claude.ai |
-| `statusline/claude-live.json` | `ClaudeLiveUsage` | When the app checked api.anthropic.com |
+| `statusline/claude-web.json` | `WebUsageSource` | When the app asked claude.ai |
 | `statusline/claude.json` | `claude-statusline.py` | When the script *received* it from Claude Code |
 
 `ClaudeReadings.choose` picks, **each time the screen is drawn**:
 1. The newest **claude.ai** reading under **15 minutes** old with a valid window.
    It is preferred because it can be asked every minute.
-2. Otherwise the newest **api.anthropic.com** reading under 15 minutes old with a
-   valid window.
-3. Otherwise, the newest reading of any source that still has a valid window.
-4. Otherwise, the newest reading, shown as "unknown".
+2. Otherwise, the newest reading of any source that still has a valid window.
+3. Otherwise, the newest reading, shown as "unknown".
 
 Validity comes first, so a reading that has reset can never hide a usable one.
-
-A fresh live check wins even over a newer status-line reading: the status line
-only says when the script received a figure, and Claude Code may be repeating one
-from its last response.
 
 Both files sit in `statusline/`, which is its own watched folder. Watching the
 parent folder would also catch the app's own SQLite writes and loop forever.
@@ -210,7 +205,7 @@ parent folder would also catch the app's own SQLite writes and loop forever.
 timeout, folder mode `0700`.
 
 **Schema versions are protected three ways.** An older build running alongside a
-newer one once doubled every token count, so:
+newer one once corrupted the cache (it doubled what was then a token count), so:
 
 ```mermaid
 flowchart LR
@@ -282,10 +277,11 @@ Why each piece exists:
 - **No SwiftUI state macros:** the panel is a plain function of the values
   passed in, and `UsageStore.onChange` triggers redraws. See
   [CONTRIBUTING.md](../CONTRIBUTING.md#why-not-xcode-or-swift-build) for why.
-- **Menu bar label is one image:** logos and text are drawn together with
-  `isTemplate = true`, so macOS tints the whole thing for light and dark menu bars.
-  Logos placed inside attributed text didn't get tinted and disappeared on dark
-  menu bars.
+- **Menu bar label is one image:** logos and text are drawn together, because
+  logos placed inside attributed text disappeared on dark menu bars. It is *not* a
+  template image (templates are one colour, and the percentages are coloured).
+  Instead the drawing handler runs at display time under the menu bar's
+  appearance, so `labelColor` resolves to white or black as needed.
 
 ---
 
@@ -293,7 +289,7 @@ Why each piece exists:
 
 `build-app.sh`:
 1. `swiftc -O` every file in `Sources/AIUsageMeter/` for `arm64-apple-macosx14.0`.
-   SQLite3 and Security are linked automatically.
+   SQLite3 is linked automatically.
 2. Assembles `build/AI Usage Meter.app`: binary, `Info.plist` (`LSUIElement`, bundle
    id `local.aiusagemeter`), `AppIcon.icns`, the two logo SVGs.
 3. Signs it ad hoc (`codesign --sign -`).
