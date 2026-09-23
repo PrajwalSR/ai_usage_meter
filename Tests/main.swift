@@ -102,7 +102,7 @@ func providerReading(_ provider: Provider, _ reading: AllowanceReading?) -> Prov
 
 test("Expiry: a reading whose windows have all reset shows as unknown, never 0%") {
     let r = providerReading(.claude, AllowanceReading(
-        recordedAt: now.addingTimeInterval(-7200), source: .anthropicLive, planType: nil,
+        recordedAt: now.addingTimeInterval(-7200), source: .claudeWeb, planType: nil,
         windows: [window(80, minutes: 300, resetsIn: -60)]))
     if case .expired = r.display(now: now) {} else { check(false, "expected .expired") }
     check(UsageStore.menuBarText(r, now: now) == "?", "menu bar should show ?")
@@ -120,7 +120,7 @@ test("Expiry: the same reading is valid before reset and unknown after, without 
 
 test("Expiry: an expired window is dropped while a valid one stays") {
     let r = providerReading(.claude, AllowanceReading(
-        recordedAt: now, source: .anthropicLive, planType: nil,
+        recordedAt: now, source: .claudeWeb, planType: nil,
         windows: [window(90, minutes: 300, resetsIn: -1), window(40, minutes: 10080, resetsIn: 86400)]))
     guard case .available(let head, let others, _) = r.display(now: now) else {
         return check(false, "expected .available")
@@ -131,11 +131,32 @@ test("Expiry: an expired window is dropped while a valid one stays") {
 
 test("Menu bar text: percentage and countdown") {
     let r = providerReading(.claude, AllowanceReading(
-        recordedAt: now, source: .anthropicLive, planType: nil,
+        recordedAt: now, source: .claudeWeb, planType: nil,
         windows: [window(38.4, minutes: 300, resetsIn: 2 * 3600 + 21 * 60 + 5)]))
     check(UsageStore.menuBarText(r, now: now) == "38% in 2h 21m",
           "got \(UsageStore.menuBarText(r, now: now))")
     check(UsageStore.menuBarText(providerReading(.codex, nil), now: now) == "—", "no reading should be —")
+}
+
+test("Menu bar colour: plain below 25%, then yellow, orange, red") {
+    check(ProviderIcons.UsageBand(usedPercent: 0) == .plain, "0% should be plain")
+    check(ProviderIcons.UsageBand(usedPercent: 24) == .plain, "24% should be plain")
+    check(ProviderIcons.UsageBand(usedPercent: 25) == .low, "25% should be yellow")
+    check(ProviderIcons.UsageBand(usedPercent: 49) == .low, "49% should be yellow")
+    check(ProviderIcons.UsageBand(usedPercent: 50) == .medium, "50% should be orange")
+    check(ProviderIcons.UsageBand(usedPercent: 79) == .medium, "79% should be orange")
+    check(ProviderIcons.UsageBand(usedPercent: 80) == .high, "80% should be red")
+    check(ProviderIcons.UsageBand(usedPercent: 100) == .high, "100% should be red")
+
+    // The colour follows the number shown, which is rounded: 24.6% reads "25%".
+    let r = providerReading(.claude, AllowanceReading(
+        recordedAt: now, source: .claudeWeb, planType: nil,
+        windows: [window(24.6, minutes: 300, resetsIn: 3600)]))
+    check(UsageStore.menuBarFigure(r, now: now).usedPercent == 25, "colour should use the rounded figure")
+    let expired = providerReading(.claude, AllowanceReading(
+        recordedAt: now.addingTimeInterval(-7200), source: .claudeWeb, planType: nil,
+        windows: [window(90, minutes: 300, resetsIn: -60)]))
+    check(UsageStore.menuBarFigure(expired, now: now).usedPercent == nil, "an unknown figure gets no colour")
 }
 
 // MARK: - Codex windows and limit ids
@@ -186,38 +207,37 @@ func claudeReading(_ source: ReadingSource, age: TimeInterval, pct: Double) -> A
                      windows: [window(pct, minutes: 300, resetsIn: 3600)])
 }
 
-test("Claude: a fresh live check wins over a newer status-line reading") {
-    let live = claudeReading(.anthropicLive, age: 5 * 60, pct: 40)
+test("Claude: a fresh claude.ai reading wins over a newer status-line reading") {
+    let web = claudeReading(.claudeWeb, age: 5 * 60, pct: 40)
     let status = claudeReading(.claudeStatusLine, age: 10, pct: 20)
-    check(ClaudeReadings.choose([status, live], now: now)?.source == .anthropicLive, "live should win")
+    check(ClaudeReadings.choose([status, web], now: now)?.source == .claudeWeb, "claude.ai should win")
 }
 
-test("Claude: a stale live check loses to a newer status-line reading") {
-    let live = claudeReading(.anthropicLive, age: 60 * 60, pct: 40)
+test("Claude: a stale claude.ai reading loses to a newer status-line reading") {
+    let web = claudeReading(.claudeWeb, age: 60 * 60, pct: 40)
     let status = claudeReading(.claudeStatusLine, age: 10, pct: 20)
-    check(ClaudeReadings.choose([live, status], now: now)?.source == .claudeStatusLine,
-          "newer status line should win over hour-old live")
+    check(ClaudeReadings.choose([web, status], now: now)?.source == .claudeStatusLine,
+          "newer status line should win over hour-old claude.ai")
 }
 
 test("Claude: the two sources are read from separate files") {
-    let liveURL = writeFile("claude-live.json", Data(
+    let webURL = writeFile("claude-web.json", Data(
         #"{"received_at":1800000000,"rate_limits":{"five_hour":{"used_percentage":38,"resets_at":1800003600}}}"#.utf8))
     let statusURL = writeFile("claude.json", Data(
         #"{"received_at":1799999000,"rate_limits":{"seven_day":{"used_percentage":63,"resets_at":1800500000}}}"#.utf8))
     // Point every source at the temp folder: a test must never read the real files.
-    let all = ClaudeReadings.load(liveURL: liveURL, statusLineURL: statusURL,
-                                  webURL: tmp.appendingPathComponent("no-web-file.json"))
+    let all = ClaudeReadings.load(statusLineURL: statusURL, webURL: webURL)
     check(all.count == 2, "expected both readings")
-    check(all.contains { $0.source == .anthropicLive && $0.windows.first?.windowMinutes == 300 }, "live missing")
+    check(all.contains { $0.source == .claudeWeb && $0.windows.first?.windowMinutes == 300 }, "claude.ai missing")
     check(all.contains { $0.source == .claudeStatusLine && $0.windows.first?.windowMinutes == 10080 },
           "status line missing")
 }
 
-test("Claude: files from older builds (recorded_at + source marker) still load") {
+test("Claude: files from older builds (recorded_at) still load") {
     let url = writeFile("legacy.json", Data(
         #"{"recorded_at":1800000000,"source":"anthropic-usage-endpoint","rate_limits":{"five_hour":{"used_percentage":10}}}"#.utf8))
-    let r = ClaudeReadings.read(url, defaultSource: .claudeStatusLine)
-    check(r?.source == .anthropicLive, "legacy live marker should map to .anthropicLive")
+    let r = ClaudeReadings.read(url, source: .claudeStatusLine)
+    check(r?.source == .claudeStatusLine && r?.windows.first?.usedPercent == 10, "legacy file should load")
 }
 
 // MARK: - Database
@@ -296,15 +316,15 @@ test("Codex: a newer reading for one limit doesn't hide another still-valid limi
     check(others.map(\.limitId) == ["other-limit"], "other limit should be listed")
 }
 
-test("Claude: an expired live reading doesn't hide a valid status-line reading") {
-    let live = AllowanceReading(recordedAt: now.addingTimeInterval(-120), source: .anthropicLive, planType: nil,
+test("Claude: an expired claude.ai reading doesn't hide a valid status-line reading") {
+    let live = AllowanceReading(recordedAt: now.addingTimeInterval(-120), source: .claudeWeb, planType: nil,
                                 windows: [window(99, minutes: 300, resetsIn: -1)])
     let status = claudeReading(.claudeStatusLine, age: 10, pct: 2)
     check(ClaudeReadings.choose([live, status], now: now)?.source == .claudeStatusLine,
-          "expired live reading won over a valid status-line reading")
+          "expired claude.ai reading won over a valid status-line reading")
 
-    // Also at display time: a live reading that expires after loading must stop winning.
-    let fresh = AllowanceReading(recordedAt: now, source: .anthropicLive, planType: nil,
+    // Also at display time: a claude.ai reading that expires after loading must stop winning.
+    let fresh = AllowanceReading(recordedAt: now, source: .claudeWeb, planType: nil,
                                  windows: [window(50, minutes: 300, resetsIn: 60)])
     let backup = AllowanceReading(recordedAt: now, source: .claudeStatusLine, planType: nil,
                                   windows: [window(20, minutes: 300, resetsIn: 7200)])
@@ -312,11 +332,11 @@ test("Claude: an expired live reading doesn't hide a valid status-line reading")
     var both = r
     both.readings = [fresh, backup]
     if case .available(_, _, let src) = both.display(now: now) {
-        check(src.source == .anthropicLive, "fresh live should win before it expires")
+        check(src.source == .claudeWeb, "fresh claude.ai should win before it expires")
     } else { check(false, "expected .available") }
     if case .available(_, _, let src) = both.display(now: now.addingTimeInterval(61)) {
-        check(src.source == .claudeStatusLine, "status line should win once live expires")
-    } else { check(false, "expected .available after live expiry") }
+        check(src.source == .claudeStatusLine, "status line should win once claude.ai expires")
+    } else { check(false, "expected .available after claude.ai expiry") }
 }
 
 test("LineReader: an oversized line that ends inside one chunk is skipped") {
@@ -368,7 +388,7 @@ test("A window with no reset time goes stale once it is older than its own lengt
     // Anthropic omits resets_at for a 5-hour window sitting at 0%. Such a reading
     // used to stay on screen for ever, showing 0% long after real use had started.
     let noReset = AllowanceWindow(usedPercent: 0, windowMinutes: 300, resetsAt: nil, limitId: nil)
-    let reading = AllowanceReading(recordedAt: now, source: .anthropicLive, planType: nil,
+    let reading = AllowanceReading(recordedAt: now, source: .claudeWeb, planType: nil,
                                    windows: [noReset])
     check(reading.liveWindows(now: now.addingTimeInterval(3600)).count == 1,
           "should still count an hour later")
@@ -390,16 +410,9 @@ test("A window with no reset time and no length is trusted for an hour") {
 test("An explicit reset time still wins over the window's length") {
     let w = AllowanceWindow(usedPercent: 20, windowMinutes: 10080,
                             resetsAt: now.addingTimeInterval(60), limitId: nil)
-    let reading = AllowanceReading(recordedAt: now, source: .anthropicLive, planType: nil, windows: [w])
+    let reading = AllowanceReading(recordedAt: now, source: .claudeWeb, planType: nil, windows: [w])
     check(reading.liveWindows(now: now.addingTimeInterval(61)).isEmpty,
           "a passed reset time expires the window even though the week isn't over")
-}
-
-test("Rate-limit backoff grows and stops at an hour") {
-    check(ClaudeLiveUsage.backoff(afterFailures: 1) == 15 * 60, "first wait should be 15 min")
-    check(ClaudeLiveUsage.backoff(afterFailures: 2) == 30 * 60, "second wait should be 30 min")
-    check(ClaudeLiveUsage.backoff(afterFailures: 3) == 60 * 60, "third wait should be 60 min")
-    check(ClaudeLiveUsage.backoff(afterFailures: 9) == 60 * 60, "should never exceed an hour")
 }
 
 // MARK: - claude.ai website source
@@ -415,7 +428,7 @@ test("claude.ai reply: real windows are kept, internal code-name entries are not
       "nimbus_quill":{"utilization":0,"resets_at":null},
       "extra_usage":{"is_enabled":false,"utilization":null}}}
     """
-    let windows = Dictionary(uniqueKeysWithValues: ClaudeWebSource.parseWindows(
+    let windows = Dictionary(uniqueKeysWithValues: WebUsageSource.parseWindows(
         (try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])["usage"]!))
     check(windows.count == 2, "expected 2 real windows, got \(windows.keys.sorted())")
     check(windows["five_hour"]?.usedPercent == 45 && windows["five_hour"]?.windowMinutes == 300,
@@ -430,19 +443,68 @@ test("claude.ai: a named limit with a reset time is kept under its own name") {
     let json = """
     {"usage":{"some_new_limit":{"utilization":22,"resets_at":"2027-03-02T10:00:00.000000Z"}}}
     """
-    let windows = ClaudeWebSource.parseWindows(
+    let windows = WebUsageSource.parseWindows(
         (try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])["usage"]!)
     check(windows.count == 1 && windows[0].1.limitId == "some_new_limit",
           "an unfamiliar but real limit should be kept, labelled: \(windows)")
 }
 
-test("A fresh claude.ai reading wins over the rate-limited api.anthropic.com one") {
-    let web = AllowanceReading(recordedAt: now.addingTimeInterval(-30), source: .claudeWeb,
-                               planType: nil, windows: [window(45, minutes: 300, resetsIn: 3600)])
-    let live = AllowanceReading(recordedAt: now.addingTimeInterval(-60), source: .anthropicLive,
-                                planType: nil, windows: [window(7, minutes: 300, resetsIn: 3600)])
-    check(ClaudeReadings.choose([live, web], now: now)?.source == .claudeWeb,
-          "claude.ai should win when recent")
+test("chatgpt.com: primary/secondary windows keep their length and reset time") {
+    // chatgpt.com names windows by rank; the length comes from window_minutes,
+    // and some replies give the reset as seconds from now.
+    let json = """
+    {"usage":{"rate_limits":{
+      "primary_window":{"used_percent":61,"limit_window_seconds":604800,"reset_after_seconds":500000,"reset_at":1800500000},
+      "secondary_window":{"used_percent":12,"limit_window_seconds":18000,"reset_at":1800000000}}}}
+    """
+    let windows = Dictionary(uniqueKeysWithValues: WebUsageSource.parseWindows(
+        (try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])["usage"]!))
+    check(windows.count == 2, "expected both windows, got \(windows.keys.sorted())")
+    check(windows["primary"]?.windowMinutes == 10080 && windows["primary"]?.usedPercent == 61,
+          "weekly window wrong: \(String(describing: windows["primary"]))")
+    check(windows["primary"]?.resetsAt != nil, "reset time should be parsed")
+    check(windows["primary"]?.limitId == nil, "a rank name is not a limit id")
+    check(windows["secondary"]?.windowMinutes == 300, "5-hour window wrong")
+}
+
+test("Source priority: a website wins, and each provider falls back in its own order") {
+    let webCodex = AllowanceReading(recordedAt: now.addingTimeInterval(-30), source: .chatgptWeb,
+                                    planType: nil, windows: [window(61, minutes: 10080, resetsIn: 8000)])
+    let logCodex = AllowanceReading(recordedAt: now, source: .codexLog, planType: "prolite",
+                                    windows: [window(55, minutes: 10080, resetsIn: 8000, limitId: "codex")])
+    let chosen = ReadingSelection.choose(provider: .codex, readings: [logCodex, webCodex], now: now)
+    check(chosen.map(\.source) == [.chatgptWeb], "chatgpt.com should win even over a newer log line")
+
+    // …but an hours-old website reading loses to the log.
+    let staleWeb = AllowanceReading(recordedAt: now.addingTimeInterval(-3600), source: .chatgptWeb,
+                                    planType: nil, windows: [window(61, minutes: 10080, resetsIn: 8000)])
+    check(ReadingSelection.choose(provider: .codex, readings: [logCodex, staleWeb], now: now)
+            .map(\.source) == [.codexLog], "a stale website reading should lose to the log")
+}
+
+test("A website reading replaces that source's earlier set, not just same-named limits") {
+    // chatgpt.com once reported "primary_window", then "primary". The old row
+    // must not survive as if it were a second limit.
+    let db = try Database(url: tmp.appendingPathComponent("supersede.sqlite"))
+    try db.addReading(provider: "codex", AllowanceReading(
+        recordedAt: now.addingTimeInterval(-60), source: .chatgptWeb, planType: nil,
+        windows: [window(61, minutes: nil ?? 0, resetsIn: 3600, limitId: "primary_window")]))
+    try db.deleteReadings(provider: "codex", source: .chatgptWeb)
+    try db.addReading(provider: "codex", AllowanceReading(
+        recordedAt: now, source: .chatgptWeb, planType: nil,
+        windows: [window(61, minutes: 10080, resetsIn: 3600)]))
+    let latest = try db.latestReadings(provider: "codex")
+    check(latest.count == 1, "expected one reading, got \(latest.count)")
+    check(latest.first?.windows.count == 1 && latest.first?.windows.first?.windowMinutes == 10080,
+          "the old row survived: \(String(describing: latest.first?.windows))")
+
+    // Log readings are not cleared this way.
+    try db.addReading(provider: "codex", AllowanceReading(
+        recordedAt: now, source: .codexLog, planType: nil,
+        windows: [window(55, minutes: 10080, resetsIn: 3600, limitId: "codex")]))
+    try db.deleteReadings(provider: "codex", source: .chatgptWeb)
+    let afterClear = try db.latestReadings(provider: "codex")
+    check(afterClear.map(\.source) == [.codexLog], "log readings should be untouched")
 }
 
 // MARK: - Result

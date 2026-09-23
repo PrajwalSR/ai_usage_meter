@@ -12,7 +12,7 @@ import Foundation
 enum CodexParser: LogParser {
     static let provider = Provider.codex
     static let noReadingNote =
-        "No Codex limit found in recent logs. It appears after Codex runs."
+        "No Codex limit yet. Sign in to ChatGPT under ⚙ → Accounts, or run Codex once."
 
     static var root: URL {
         FileManager.default.homeDirectoryForCurrentUser

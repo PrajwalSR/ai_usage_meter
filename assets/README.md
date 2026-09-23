@@ -5,7 +5,6 @@
 | `app-icon.svg` | **Source artwork** for the app icon (firefly). Edit this one. | Made for this project |
 | `AppIcon.iconset/`, `AppIcon.icns` | App icon at every size macOS needs | Generated from `app-icon.svg` |
 | `firefly.png` | 1024 px render of the app icon | Generated from `app-icon.svg` |
-| `matchstick-concept.svg` | An alternative icon idea, not used by the app | Made for this project |
 | `claude.svg` | Claude logo, used in the menu bar | [Simple Icons](https://simpleicons.org) (CC0) |
 | `openai.svg` | OpenAI logo, used in the menu bar | [Simple Icons](https://simpleicons.org) (CC0) |
 

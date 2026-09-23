@@ -1,11 +1,11 @@
 import AppKit
 import WebKit
 
-/// Reads Claude usage the way the claude.ai website itself does.
+/// Reads usage the way a provider's own website does.
 ///
-/// Why this exists: `api.anthropic.com/api/oauth/usage` (see `ClaudeLiveUsage`)
-/// is rate-limited hard — once tripped it answered `Retry-After: 2493`. The
-/// website's own endpoints are a different backend, which is how other menu bar
+/// Why this exists: `api.anthropic.com/api/oauth/usage` (which earlier builds
+/// read with the Claude Code login from the Keychain) is rate-limited hard —
+/// once tripped it answered `Retry-After: 2493`. The website's own endpoints are a different backend, which is how other menu bar
 /// apps refresh every minute.
 ///
 /// How it works, and why it's built this way:
@@ -18,8 +18,59 @@ import WebKit
 ///   - The session lives in the app's own website data store, so signing out
 ///     inside the window is enough to remove it.
 @MainActor
-final class ClaudeWebSession: NSObject {
-    static let shared = ClaudeWebSession()
+final class WebSession: NSObject {
+    /// claude.ai: usage for the Claude account.
+    static let claude = WebSession(
+        siteName: "Claude",
+        home: URL(string: "https://claude.ai/")!,
+        login: URL(string: "https://claude.ai/login")!,
+        script: """
+        const o = await fetch('/api/organizations', { credentials: 'include' });
+        if (!o.ok) return JSON.stringify({ __error: 'organizations', status: o.status });
+        const orgs = await o.json();
+        if (!Array.isArray(orgs) || orgs.length === 0)
+          return JSON.stringify({ __error: 'no organizations' });
+        const org = orgs.find(x => (x.capabilities || []).includes('chat')) || orgs[0];
+        const u = await fetch('/api/organizations/' + org.uuid + '/usage', { credentials: 'include' });
+        if (!u.ok) return JSON.stringify({ __error: 'usage', status: u.status });
+        return JSON.stringify({ __orgCount: orgs.length, usage: await u.json() });
+        """)
+
+    /// chatgpt.com: usage for the Codex limit on the ChatGPT plan.
+    ///
+    /// The website's own pages call `/backend-api/...` with a bearer token that
+    /// `/api/auth/session` hands to the page. Both calls run inside the page, so
+    /// the token never leaves it and the app never stores anything.
+    static let chatGPT = WebSession(
+        siteName: "ChatGPT",
+        home: URL(string: "https://chatgpt.com/codex/settings/usage")!,
+        login: URL(string: "https://chatgpt.com/auth/login")!,
+        script: """
+        const s = await fetch('/api/auth/session', { credentials: 'include' });
+        if (!s.ok) return JSON.stringify({ __error: 'session', status: s.status });
+        const session = await s.json();
+        const token = session && session.accessToken;
+        if (!token) return JSON.stringify({ __error: 'session', status: 401 });
+        const u = await fetch('/backend-api/wham/usage', {
+          credentials: 'include',
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (!u.ok) return JSON.stringify({ __error: 'usage', status: u.status });
+        return JSON.stringify({ usage: await u.json() });
+        """)
+
+    let siteName: String
+    private let home: URL
+    private let login: URL
+    private let script: String
+
+    init(siteName: String, home: URL, login: URL, script: String) {
+        self.siteName = siteName
+        self.home = home
+        self.login = login
+        self.script = script
+        super.init()
+    }
 
     private var webView: WKWebView?
     private var loginWindow: NSWindow?
@@ -47,13 +98,13 @@ final class ClaudeWebSession: NSObject {
         var description: String {
             switch self {
             case .notSignedIn:
-                return "Not signed in to claude.ai. Click \"Sign in to Claude\" in the panel."
+                return "Not signed in. Use the sign-in link in the panel."
             case .http(let code):
                 return code == 401 || code == 403
-                    ? "claude.ai signed out. Click \"Sign in to Claude\" in the panel."
-                    : "claude.ai usage request failed (HTTP \(code))"
-            case .badResponse(let what): return "Unexpected reply from claude.ai: \(what)"
-            case .pageError(let what): return "claude.ai page problem: \(what)"
+                    ? "Signed out. Use the sign-in link in the panel."
+                    : "Usage request failed (HTTP \(code))"
+            case .badResponse(let what): return "Unexpected reply from the website: \(what)"
+            case .pageError(let what): return "Website problem: \(what)"
             }
         }
     }
@@ -74,12 +125,12 @@ final class ClaudeWebSession: NSObject {
     /// Loads claude.ai so `fetch()` below runs on that origin (cookies come with it).
     private func loadSiteIfNeeded(_ completion: @escaping (Bool) -> Void) {
         let view = makeWebView()
-        if let host = view.url?.host, host.hasSuffix("claude.ai"), !view.isLoading {
+        if let host = view.url?.host, host == home.host, !view.isLoading {
             completion(true)
             return
         }
         pendingLoad.append(completion)
-        view.load(URLRequest(url: URL(string: "https://claude.ai/")!))
+        view.load(URLRequest(url: home))
     }
 
     // MARK: - Reading usage
@@ -88,27 +139,18 @@ final class ClaudeWebSession: NSObject {
     /// JSON, so the response shape can be inspected before it is mapped.
     func fetchRawUsage(completion: @escaping (Result<String, WebFailure>) -> Void) {
         loadSiteIfNeeded { [weak self] ok in
-            guard let self, ok else { return completion(.failure(.pageError("could not load claude.ai"))) }
+            guard let self, ok else {
+                return completion(.failure(.pageError("could not load \(self?.siteName ?? "the site")")))
+            }
 
             // `callAsyncJavaScript` runs an async function body and waits for it.
             // `evaluateJavaScript` cannot: handed a promise it fails with
             // "returned a result of an unsupported type".
-            let js = """
-            const o = await fetch('/api/organizations', { credentials: 'include' });
-            if (!o.ok) return JSON.stringify({ __error: 'organizations', status: o.status });
-            const orgs = await o.json();
-            if (!Array.isArray(orgs) || orgs.length === 0)
-              return JSON.stringify({ __error: 'no organizations' });
-            // Prefer the org that can chat; otherwise the first one.
-            const org = orgs.find(x => (x.capabilities || []).includes('chat')) || orgs[0];
-            const u = await fetch('/api/organizations/' + org.uuid + '/usage', { credentials: 'include' });
-            if (!u.ok) return JSON.stringify({ __error: 'usage', status: u.status });
-            return JSON.stringify({ __orgCount: orgs.length, usage: await u.json() });
-            """
+            let js = self.script
             self.webView?.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
                 switch result {
                 case .failure(let error):
-                    Self.log("usage call failed: \(error.localizedDescription)")
+                    Self.log("\(self.siteName): usage call failed: \(error.localizedDescription)")
                     completion(.failure(.pageError(error.localizedDescription)))
                 case .success(let value):
                     guard let text = value as? String else {
@@ -117,7 +159,7 @@ final class ClaudeWebSession: NSObject {
                     if let data = text.data(using: .utf8),
                        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                         if let status = obj["status"] as? Int {
-                            Self.log("usage call returned HTTP \(status)")
+                            Self.log("\(self.siteName): usage call returned HTTP \(status)")
                             return completion(status == 401 || status == 403
                                               ? .failure(.notSignedIn) : .failure(.http(status)))
                         }
@@ -125,7 +167,7 @@ final class ClaudeWebSession: NSObject {
                             return completion(.failure(.badResponse(err)))
                         }
                     }
-                    Self.log("usage call ok (\(text.count) bytes)")
+                    Self.log("\(self.siteName): usage call ok (\(text.count) bytes)")
                     completion(.success(text))
                 }
             }
@@ -149,7 +191,7 @@ final class ClaudeWebSession: NSObject {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                   backing: .buffered, defer: false)
-            window.title = "Sign in to Claude"
+            window.title = "Sign in to \(siteName)"
             window.contentView = view
             window.isReleasedWhenClosed = false     // reused for the next sign-in
             window.delegate = self
@@ -157,32 +199,32 @@ final class ClaudeWebSession: NSObject {
             loginWindow = window
         }
 
-        view.load(URLRequest(url: URL(string: "https://claude.ai/login")!))
+        view.load(URLRequest(url: login))
         loginWindow?.makeKeyAndOrderFront(nil)
         loginWindow?.orderFrontRegardless()
         loginWindow?.makeFirstResponder(view)
-        Self.log("sign-in window opened")
+        Self.log("\(siteName): sign-in window opened")
     }
 
     func closeLoginWindow() {
         guard let loginWindow, loginWindow.isVisible else { return }
         loginWindow.orderOut(nil)
         NSApp.setActivationPolicy(.accessory)       // back to menu bar only
-        Self.log("sign-in window closed")
+        Self.log("\(siteName): sign-in window closed")
     }
 }
 
-extension ClaudeWebSession: NSWindowDelegate {
+extension WebSession: NSWindowDelegate {
     /// Closing the sign-in window must not quit a menu bar app.
     nonisolated func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
             NSApp.setActivationPolicy(.accessory)
-            Self.log("sign-in window dismissed by user")
+            Self.log("\(self.siteName): sign-in window dismissed by user")
         }
     }
 }
 
-extension ClaudeWebSession: WKNavigationDelegate {
+extension WebSession: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
             let waiting = self.pendingLoad

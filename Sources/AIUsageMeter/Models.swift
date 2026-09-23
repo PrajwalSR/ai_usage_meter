@@ -4,16 +4,16 @@ import Foundation
 
 /// Where an allowance reading came from. The UI words each one differently,
 /// because they mean different things:
-/// - `anthropicLive`: we asked Anthropic just now ("checked with Anthropic").
 /// - `claudeStatusLine`: Claude Code handed it to a local script; the time is
 ///   when it was *received locally*, not when Anthropic produced it.
 /// - `codexLog`: the Codex CLI wrote it into a session log while running.
 enum ReadingSource: String, Sendable, Equatable, CaseIterable {
-    case anthropicLive = "anthropic-live"
     case claudeStatusLine = "claude-statusline"
     case codexLog = "codex-log"
     /// Read from claude.ai inside the app's own signed-in web view.
     case claudeWeb = "claude-web"
+    /// Read from chatgpt.com inside the app's own signed-in web view.
+    case chatgptWeb = "chatgpt-web"
 }
 
 /// One limit window as a provider reported it, e.g. "5-hour, 38% used".
@@ -80,6 +80,15 @@ enum Provider: String, Sendable, Equatable {
         }
     }
 
+    /// Sources to prefer, best first. A source is only skipped when it has
+    /// nothing recent to say.
+    var sourcePriority: [ReadingSource] {
+        switch self {
+        case .claude: return [.claudeWeb, .claudeStatusLine]
+        case .codex: return [.chatgptWeb, .codexLog]
+        }
+    }
+
     /// Which window leads the card and the menu bar.
     /// - Claude: the 5-hour window, the one that moves while working.
     /// - Codex: the window closest to its limit, the one that will stop work.
@@ -91,6 +100,36 @@ enum Provider: String, Sendable, Equatable {
         case .codex:
             return windows.max { $0.usedPercent < $1.usedPercent }
         }
+    }
+}
+
+/// Picks which readings to show, from which source.
+///
+/// Websites (claude.ai, chatgpt.com) can be asked every minute, so they lead.
+/// The others fill in when the website has nothing recent: api.anthropic.com is
+/// rate-limited, Codex's logs only change when Codex runs, and the status line
+/// only runs in a terminal.
+enum ReadingSelection {
+    /// A reading this recent from a preferred source wins outright.
+    static let freshness: TimeInterval = 15 * 60
+
+    /// Returns every reading from the chosen source, so a provider reporting
+    /// several limits keeps them all.
+    static func choose(provider: Provider, readings: [AllowanceReading],
+                       now: Date) -> [AllowanceReading] {
+        // Prefer readings that still have a valid window; fall back to all of
+        // them so an expired reading can still be shown as "unknown".
+        let usable = readings.filter { !$0.liveWindows(now: now).isEmpty }
+        let pool = usable.isEmpty ? readings : usable
+
+        for source in provider.sourcePriority {
+            let fromSource = pool.filter { $0.source == source }
+            guard let newest = fromSource.max(by: { $0.recordedAt < $1.recordedAt }) else { continue }
+            if now.timeIntervalSince(newest.recordedAt) <= freshness { return fromSource }
+        }
+        // Nothing recent anywhere: show whichever source spoke last.
+        guard let newest = pool.max(by: { $0.recordedAt < $1.recordedAt }) else { return [] }
+        return pool.filter { $0.source == newest.source }
     }
 }
 
@@ -129,9 +168,7 @@ struct ProviderReading: Sendable, Equatable {
     /// Claude the source is also chosen here, since which reading is usable
     /// changes as windows reset.
     func display(now: Date) -> AllowanceDisplay {
-        let readings = provider == .claude
-            ? ClaudeReadings.choose(self.readings, now: now).map { [$0] } ?? []
-            : self.readings
+        let readings = ReadingSelection.choose(provider: provider, readings: self.readings, now: now)
         guard let newest = readings.max(by: { $0.recordedAt < $1.recordedAt }) else { return .unavailable }
         let valid = readings.flatMap { r in r.liveWindows(now: now).map { (window: $0, reading: r) } }
         guard let head = provider.headline(from: valid.map(\.window)),
@@ -196,10 +233,10 @@ enum Fmt {
     /// How the source of a reading is described to the user.
     static func sourceLine(_ r: AllowanceReading, now: Date) -> String {
         switch r.source {
-        case .anthropicLive: return "Checked with Anthropic · \(age(r.recordedAt, now: now))"
         case .claudeStatusLine: return "From Claude Code status line · received \(age(r.recordedAt, now: now))"
         case .codexLog: return "From Codex logs · recorded \(age(r.recordedAt, now: now))"
         case .claudeWeb: return "From claude.ai · \(age(r.recordedAt, now: now))"
+        case .chatgptWeb: return "From chatgpt.com · \(age(r.recordedAt, now: now))"
         }
     }
 }

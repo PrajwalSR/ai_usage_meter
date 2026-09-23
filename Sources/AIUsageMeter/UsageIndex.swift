@@ -29,9 +29,8 @@ final class UsageIndex {
         do {
             try db.begin()
             (seen, read) = try ingest(CodexParser.self, now: now, errors: &errors)
-            for reading in ClaudeReadings.load() {
-                try db.addReading(provider: Provider.claude.rawValue, reading)
-            }
+            try store(ClaudeReadings.load(), for: .claude)
+            try store(CodexReadings.load(), for: .codex)
             try db.pruneReadings(before: now.addingTimeInterval(-30 * 86400))
             try db.commit()
         } catch {
@@ -45,6 +44,19 @@ final class UsageIndex {
         let claude = build(.claude, now: now, seen: 0, read: 0, errors: &errors)
         return UsageReport(claude: claude, codex: codex, scannedAt: now,
                            scanDuration: Date().timeIntervalSince(t0), errors: errors)
+    }
+
+    /// Saves readings that came from a file rather than a log. Each such source
+    /// reports its complete set of limits every time, so its previous rows are
+    /// replaced — otherwise a limit that vanished, or one stored under an older
+    /// name, would hang around as a duplicate.
+    private func store(_ readings: [AllowanceReading], for provider: Provider) throws {
+        for source in Set(readings.map(\.source)) {
+            try db.deleteReadings(provider: provider.rawValue, source: source)
+        }
+        for reading in readings {
+            try db.addReading(provider: provider.rawValue, reading)
+        }
     }
 
     // MARK: - Ingest

@@ -1,36 +1,46 @@
 import Foundation
 
-/// Turns claude.ai's own usage reply into a reading file.
+/// Turns a provider website's usage reply into a reading file.
 ///
 /// The reply's shape isn't documented, so the parser is deliberately loose: it
 /// looks for any block holding a percentage, works out which window it is from
 /// its key, and keeps anything it doesn't recognise as its own limit rather than
 /// dropping it. The raw reply is also saved once, so the shape can be checked.
-enum ClaudeWebSource {
+enum WebUsageSource {
     /// How often the app may ask claude.ai. The website polls itself about this
     /// often, and this backend isn't the rate-limited one.
     static let pollInterval: TimeInterval = 60
 
-    static var rawDumpURL: URL {
-        ClaudeReadings.directory.appendingPathComponent("claude-web-raw.json")
+    /// Where each site's reading and raw reply are written.
+    struct Destination {
+        var reading: URL
+        var rawDump: URL
+
+        static let claude = Destination(
+            reading: ClaudeReadings.webFileURL,
+            rawDump: ClaudeReadings.directory.appendingPathComponent("claude-web-raw.json"))
+        static let chatGPT = Destination(
+            reading: CodexReadings.webFileURL,
+            rawDump: ClaudeReadings.directory.appendingPathComponent("chatgpt-web-raw.json"))
     }
 
-    /// Parses the JSON from `ClaudeWebSession.fetchRawUsage` and writes the
-    /// reading file. Returns a description of the problem on failure.
+    /// Parses the JSON from `WebSession.fetchRawUsage` and writes the reading
+    /// file. Returns a description of the problem on failure.
     @discardableResult
-    static func store(rawJSON: String, now: Date = Date()) -> String? {
+    static func store(rawJSON: String, to destination: Destination,
+                      source: ReadingSource, now: Date = Date()) -> String? {
         guard let data = rawJSON.data(using: .utf8),
               let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let usage = top["usage"] else { return "no usage in reply" }
+              let usage = top["usage"] else { return "no usage in the website's reply" }
 
         // Keep the raw reply for inspection; usage numbers only, no cookie.
         try? FileManager.default.createDirectory(at: ClaudeReadings.directory,
                                                  withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
-        try? rawJSON.data(using: .utf8)?.write(to: rawDumpURL, options: .atomic)
+        try? rawJSON.data(using: .utf8)?.write(to: destination.rawDump, options: .atomic)
 
         let windows = parseWindows(usage)
-        guard !windows.isEmpty else { return "no percentages found in claude.ai reply" }
+        guard !windows.isEmpty else { return "no percentages found in the website's reply" }
 
         var rateLimits: [String: Any] = [:]
         for (key, w) in windows {
@@ -42,11 +52,12 @@ enum ClaudeWebSource {
         let payload: [String: Any] = ["received_at": now.timeIntervalSince1970,
                                       "rate_limits": rateLimits]
         guard let out = try? JSONSerialization.data(withJSONObject: payload),
-              (try? out.write(to: ClaudeReadings.webFileURL, options: .atomic)) != nil else {
-            return "could not save the claude.ai reading"
+              (try? out.write(to: destination.reading, options: .atomic)) != nil else {
+            return "could not save the reading"
         }
         try? FileManager.default.setAttributes([.posixPermissions: 0o600],
-                                               ofItemAtPath: ClaudeReadings.webFileURL.path)
+                                               ofItemAtPath: destination.reading.path)
+        _ = source          // the reading file's source is decided by which file it is
         return nil
     }
 
@@ -75,7 +86,7 @@ enum ClaudeWebSource {
                     usedPercent: percent,
                     windowMinutes: minutes,
                     resetsAt: resets,
-                    limitId: knownNames.contains(name) ? nil : name)))
+                    limitId: (knownNames.union(rankNames)).contains(name) ? nil : name)))
             }
             return                                   // don't descend into a window
         }
@@ -91,10 +102,15 @@ enum ClaudeWebSource {
         return nil
     }
 
-    private static func resetDate(in dict: [String: Any]) -> Date? {
+    private static func resetDate(in dict: [String: Any], now: Date = Date()) -> Date? {
         for name in ["resets_at", "reset_at", "resets", "next_reset"] {
             if let n = JSONPath.double(dict, name) { return Date(timeIntervalSince1970: n) }
             if let d = JSONPath.date(dict[name]) { return d }
+        }
+        // chatgpt.com reports some windows as "seconds from now" instead.
+        for name in ["resets_in_seconds", "reset_after_seconds", "seconds_until_reset"] {
+            // (reset_at is preferred above; these are the "seconds from now" forms)
+            if let n = JSONPath.double(dict, name) { return now.addingTimeInterval(n) }
         }
         return nil
     }
@@ -105,11 +121,23 @@ enum ClaudeWebSource {
         let k = key.lowercased()
         if k.contains("five") || k.contains("5h") || k.contains("session") { return "five_hour" }
         if k.contains("seven") || k.contains("7d") || k.contains("week") { return "seven_day" }
+        // chatgpt.com names its windows by rank ("primary_window"), not by
+        // length. The length comes from the same block, and a rank is not a
+        // limit name, so it is not shown as one.
+        if k.hasPrefix("primary") { return "primary" }
+        if k.hasPrefix("secondary") { return "secondary" }
         return key
     }
 
+    /// Rank names, which should not be displayed as a limit id.
+    static let rankNames: Set<String> = ["primary", "secondary"]
+
     private static func windowMinutes(for key: String, dict: [String: Any]) -> Int? {
         if let m = JSONPath.double(dict, "window_minutes") { return Int(m) }
+        // chatgpt.com reports the length in seconds instead.
+        for name in ["limit_window_seconds", "window_seconds"] {
+            if let s = JSONPath.double(dict, name), s > 0 { return Int(s / 60) }
+        }
         switch normalize(key) {
         case "five_hour": return 300
         case "seven_day": return 10080
