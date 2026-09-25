@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // Regression tests using synthetic data only. Never point these at real logs.
@@ -508,6 +509,138 @@ test("A website reading replaces that source's earlier set, not just same-named 
 }
 
 // MARK: - Result
+
+test("Account registry preserves legacy sign-ins and persists separate accounts") {
+    MainActor.assumeIsolated {
+    let url = tmp.appendingPathComponent("accounts.json")
+    let registry = AccountRegistry(fileURL: url)
+    check(registry.accounts.count == 2, "first launch should include both previous sign-ins")
+    check(registry.accounts.map(\.id) == [AccountRegistry.legacyClaudeID,
+                                         AccountRegistry.legacyCodexID],
+          "legacy IDs must stay fixed across upgrades")
+
+    let extra = registry.add(provider: .claude, label: "Work", pinned: true)
+    check(!extra.isLegacy && extra.id != AccountRegistry.legacyClaudeID,
+          "new Claude account needs a distinct store ID")
+    let reopened = AccountRegistry(fileURL: url)
+    check(reopened.accounts.contains(extra), "new account should survive relaunch")
+    check(reopened.accounts.filter(\.pinned).count == 3,
+          "all requested accounts can remain pinned")
+    var renamed = extra
+    renamed.label = "Research"
+    renamed.pinned = false
+    reopened.update(renamed)
+    let afterUpdate = AccountRegistry(fileURL: url)
+    check(afterUpdate.accounts.first(where: { $0.id == extra.id }) == renamed,
+          "label and pin changes should survive relaunch")
+    afterUpdate.remove(id: extra.id)
+    check(!AccountRegistry(fileURL: url).accounts.contains(where: { $0.id == extra.id }),
+          "removed account should not reappear")
+    }
+}
+
+test("Each added account has a separate persistent WebKit store") {
+    MainActor.assumeIsolated {
+    let first = Account(id: UUID(), provider: .claude, label: "One", pinned: true)
+    let second = Account(id: UUID(), provider: .claude, label: "Two", pinned: true)
+    let a = WebSession.forAccount(first)
+    let b = WebSession.forAccount(second)
+    check(a !== b, "accounts should not share a browser instance")
+    check(a.websiteDataStoreIdentifier == first.id, "first account has wrong WebKit store")
+    check(b.websiteDataStoreIdentifier == second.id, "second account has wrong WebKit store")
+    check(WebSession.claude.websiteDataStoreIdentifier == nil,
+          "existing Claude sign-in should retain the default WebKit store")
+    }
+}
+
+test("chatgpt.com: the plan name is kept with the reading") {
+    let dir = tmp.appendingPathComponent("plan-test", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let dest = WebUsageSource.Destination(reading: dir.appendingPathComponent("codex-web.json"),
+                                          rawDump: dir.appendingPathComponent("raw.json"))
+    let json = #"{"usage":{"plan_type":"prolite","rate_limit":{"primary_window":{"used_percent":61,"limit_window_seconds":604800,"reset_at":1800500000}}}}"#
+    check(WebUsageSource.store(rawJSON: json, to: dest, source: .chatgptWeb) == nil, "store should succeed")
+    let r = ClaudeReadings.read(dest.reading, source: .chatgptWeb)
+    check(r?.planType == "prolite", "plan should survive, got \(String(describing: r?.planType))")
+}
+
+test("Accounts can be reordered, and the order is saved") {
+    MainActor.assumeIsolated {
+        let url = tmp.appendingPathComponent("accounts-order.json")
+        try? FileManager.default.removeItem(at: url)
+        let registry = AccountRegistry(fileURL: url)
+        let extra = registry.add(provider: .claude, label: "Work")
+        let before = registry.accounts.map(\.id)
+        registry.move(fromOffsets: IndexSet(integer: 2), toOffset: 1)
+        check(registry.accounts.map(\.id) == [before[0], extra.id, before[1]], "moved up one place")
+        check(AccountRegistry(fileURL: url).accounts.map(\.id) == registry.accounts.map(\.id),
+              "order survives a reopen")
+
+        let ids = registry.accounts.map(\.id)
+        // List reordering reports the destination as an index before the move.
+        registry.move(fromOffsets: IndexSet(integer: 0), toOffset: 3)
+        check(registry.accounts.map(\.id) == [ids[1], ids[2], ids[0]], "first dragged below the last")
+        registry.move(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        check(registry.accounts.map(\.id) == [ids[0], ids[1], ids[2]], "last dragged above the first")
+        registry.move(fromOffsets: IndexSet(integer: 1), toOffset: 1)
+        check(registry.accounts.map(\.id) == [ids[0], ids[1], ids[2]], "dropping in place changes nothing")
+    }
+}
+
+// MARK: - Menu bar appearance
+
+test("Menu bar styles: % and time, % only, time left only") {
+    let r = providerReading(.claude, AllowanceReading(
+        recordedAt: now, source: .claudeWeb, planType: nil,
+        windows: [window(38.4, minutes: 300, resetsIn: 2 * 3600 + 21 * 60 + 5),
+                  window(63, minutes: 10080, resetsIn: 86400)]))
+    check(UsageStore.menuBarFigure(r, now: now, value: .percentAndTime).text == "38% in 2h 21m", "default style")
+    check(UsageStore.menuBarFigure(r, now: now, value: .percent).text == "38%", "% only")
+    let time = UsageStore.menuBarFigure(r, now: now, value: .timeLeft)
+    check(time.text == "2h 21m", "time left only, got \(time.text)")
+    check(time.usedPercent == 38, "time left still carries the % for its colour")
+}
+
+test("Menu bar All limits: shows whatever limits the account has, shortest first") {
+    let both = providerReading(.claude, AllowanceReading(
+        recordedAt: now, source: .claudeWeb, planType: nil,
+        windows: [window(63, minutes: 10080, resetsIn: 86400), window(38, minutes: 300, resetsIn: 3600)]))
+    let f = UsageStore.menuBarFigure(both, now: now, value: .allLimits)
+    check(f.text == "38% · 63%", "5-hour + weekly, got \(f.text)")
+    check(f.percents == [38, 63], "each % keeps its own colour")
+
+    let weekly = providerReading(.codex, AllowanceReading(
+        recordedAt: now, source: .chatgptWeb, planType: nil,
+        windows: [window(86, minutes: 10080, resetsIn: 86400)]))
+    check(UsageStore.menuBarFigure(weekly, now: now, value: .allLimits).text == "86%", "weekly only")
+
+    // A 5-hour limit that has reset drops out on its own.
+    let reset = providerReading(.claude, AllowanceReading(
+        recordedAt: now, source: .claudeWeb, planType: nil,
+        windows: [window(90, minutes: 300, resetsIn: -1), window(63, minutes: 10080, resetsIn: 86400)]))
+    check(UsageStore.menuBarFigure(reset, now: now, value: .allLimits).text == "63%", "expired window hidden")
+}
+
+test("Menu bar colours every % in its own band, and a lone countdown by the headline") {
+    let font = NSFont.systemFont(ofSize: 13)
+    func colour(_ s: NSAttributedString, at i: Int) -> NSColor? {
+        s.attribute(.foregroundColor, at: i, effectiveRange: nil) as? NSColor
+    }
+    let all = ProviderIcons.attributed(ProviderIcons.MenuBarFigure(
+        text: "38% · 86%", usedPercent: 38, morePercents: [86], name: "Work"), font: font)
+    check(colour(all, at: 0) == .labelColor, "name stays plain")
+    check(colour(all, at: 5) == .systemYellow, "38% yellow")
+    check(colour(all, at: 11) == .systemRed, "86% red")
+    let time = ProviderIcons.attributed(ProviderIcons.MenuBarFigure(text: "2h 21m", usedPercent: 60), font: font)
+    check(colour(time, at: 0) == .systemOrange, "countdown alone takes the headline colour")
+}
+
+test("Accounts saved before appearance settings load with the default look") {
+    let old = #"[{"id":"\#(UUID().uuidString)","provider":"claude","label":"Work","pinned":true}]"#
+    let accounts = try? JSONDecoder().decode([Account].self, from: Data(old.utf8))
+    check(accounts?.first?.value == .percentAndTime, "default value style")
+    check(accounts?.first?.labelStyle == .logoAndName, "default label style")
+}
 
 print("\n\(passed) checks passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

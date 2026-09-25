@@ -33,6 +33,15 @@ let sample = UsageReport(
         unavailableNote: ""),
     scannedAt: now, scanDuration: 0.02)
 
+// Sample accounts, both shown logo-only so the menu bar image stays compact;
+// the settings image shows their appearance pickers.
+let codexAccount = Account(id: AccountRegistry.legacyCodexID, provider: .codex, label: "Codex",
+                           pinned: true, menuLabel: .logo)
+let claudeAccount = Account(id: AccountRegistry.legacyClaudeID, provider: .claude, label: "Claude",
+                            pinned: true, menuValue: .percentAndTime, menuLabel: .logo)
+let sampleAccounts = [codexAccount, claudeAccount]
+let sampleReadings = [codexAccount.id: sample.codex!, claudeAccount.id: sample.claude!]
+
 func savePNG(_ rep: NSBitmapImageRep, _ name: String) {
     let url = outDir.appendingPathComponent(name)
     try! rep.representation(using: .png, properties: [:])!.write(to: url)
@@ -47,16 +56,28 @@ MainActor.assumeIsolated {
                                          ("settings-dark.png", NSAppearance.Name.darkAqua, true)] {
         let panel = UsagePanel(
             model: PanelModel(report: sample, isScanning: false, isWatching: true,
-                              showingSettings: settings, claudeSignedIn: true, chatGPTSignedIn: false,
+                              showingSettings: settings, claudeSignedIn: true, chatGPTSignedIn: true,
+                              accounts: sampleAccounts, accountReadings: sampleReadings,
                               launchAtLoginAvailable: true,
                               launchesAtLogin: true, errors: [], now: now),
             actions: PanelActions(refresh: {}, toggleSettings: {}, signInToClaude: {},
-                                  signInToChatGPT: {},
+                                  signInToChatGPT: {}, addAccount: { _ in },
+                                  setPinned: { _, _ in }, renameAccount: { _, _ in },
+                                  removeAccount: { _ in }, signInAccount: { _ in },
                                   toggleLaunchAtLogin: { _ in }, quit: {}))
         let host = NSHostingView(rootView: panel
             .background(appearance == .darkAqua ? Color(white: 0.16) : Color(white: 0.97)))
         host.appearance = NSAppearance(named: appearance)
         host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        // Native lists only draw their rows inside a real window, so host the
+        // view in an off-screen one and let it lay out before capturing.
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: host.frame.width,
+                                                  height: host.frame.height),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: appearance)
+        window.contentView = host
+        window.orderFrontRegardless()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         host.layoutSubtreeIfNeeded()
 
         let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
@@ -67,8 +88,13 @@ MainActor.assumeIsolated {
 
     // MARK: Menu bar, light and dark
 
-    let label = ProviderIcons.menuBarImage(codex: UsageStore.menuBarFigure(sample.codex!, now: now),
-                                           claude: UsageStore.menuBarFigure(sample.claude!, now: now))
+    // Built the same way as `UsageStore.menuBarImage`.
+    let label = ProviderIcons.menuBarImage(sampleAccounts.map { account in
+        var figure = UsageStore.menuBarFigure(sampleReadings[account.id]!, now: now, value: account.value)
+        figure.name = account.labelStyle.showsName ? account.label : nil
+        figure.showsLogo = account.labelStyle.showsLogo
+        return (account.provider, figure)
+    })
 
     for (name, background, appearance) in [("menubar-light.png", NSColor(white: 0.93, alpha: 1), NSAppearance.Name.aqua),
                                            ("menubar-dark.png", NSColor(white: 0.10, alpha: 1), NSAppearance.Name.darkAqua)] {

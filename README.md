@@ -38,7 +38,22 @@ The percentage changes color as you use more:
 | 50–79% | orange |
 | 80% and up | red |
 
-The logos and countdown always stay in the normal menu bar color.
+The logos, names and countdown stay in the normal menu bar color. (If you show
+only the time left, the time is colored instead.)
+
+### Change how each account looks
+
+Every pinned account has two menus under ⚙ → **Accounts**:
+
+| Menu | Choices |
+|---|---|
+| Label | **Logo and name** (default) · Logo only · Name only · Numbers only |
+| Value | **% and time left** (default) `38% in 2h 21m` · % only `38%` · Time left only `2h 21m` · All limits `38% · 63%` |
+
+**All limits** shows every limit the account currently reports, shortest first,
+each in its own color. An account with a 5-hour and a weekly limit shows two
+numbers; a weekly-only account shows one. A limit that has reset drops out on its
+own.
 
 ### When you click it
 
@@ -69,10 +84,10 @@ flowchart LR
     M --> C["Menu bar"]
 ```
 
-You sign in to claude.ai and chatgpt.com once each, in windows the app owns. The
-app then reads your usage **every minute**, the same numbers each site's own
-Usage page shows. Both limits are account-wide, so use on your phone or another
-computer shows up here too.
+You can add more than one Claude or Codex account. Each one signs in through a
+separate window and keeps its own browser session. The app checks signed-in
+accounts **every minute**, using the numbers each site's own Usage page shows.
+Each limit is account-wide, so use on another device shows up here too.
 
 There's no server and no extra account. It all runs on your Mac.
 
@@ -123,6 +138,15 @@ You don't need a paid Apple Developer account.
    **your email**.
 4. Once the app gets its first number, the window closes by itself and the
    numbers update every minute.
+
+For another account, click **Add Claude account** or **Add Codex account** under
+**Accounts**, then sign in to that account. Rename it so you can tell your
+accounts apart. Tick **Pin** on any accounts you want to see in the menu bar;
+you can pin as many as you like, though macOS may hide menu bar items if there
+isn't enough screen space. Unpinned accounts remain in the dropdown and keep
+updating. Drag an account up or down to change the order; the others slide
+aside and a line shows where it will land. The usage cards and menu bar items
+follow it. Removing an added account also clears its saved sign-in on this Mac.
 
 > **"Continue with Google" will not work here.** Google refuses to sign you in
 > inside an app window like this one. Use the email option.
@@ -186,7 +210,7 @@ flowchart TB
 | Does it see my password? | No. You type it on the provider's own sign-in page, inside a window the app shows but doesn't read. |
 | Where do my sessions live? | In the app's own browser storage, like any browser. **The app never reads or copies them**: it asks for usage *from inside* the signed-in page, so the page attaches its own cookie. Other apps of this kind lift the cookie out of Safari's or Chrome's cookie database; this one doesn't. |
 | Does it touch my Keychain? | No. It never reads the Keychain, including Claude Code's saved login. |
-| Does it contact the internet? | Only claude.ai and chatgpt.com, about once a minute each, for usage, and only after you sign in. Nothing else, ever. |
+| Does it contact the internet? | Only claude.ai and chatgpt.com, about once a minute per signed-in account, for usage. Nothing else, ever. |
 | Does it read my chats? | **It never opens Claude Code's logs.** It reads Codex's logs, which do hold your Codex conversations, but only looks at lines carrying the limit numbers and saves only those. |
 | Does it track me? | No. No analytics, no tracking, no crash reports. |
 | How do I sign out? | Open the sign-in window and sign out there, or delete `~/Library/Application Support/AIUsageMeter/`. |

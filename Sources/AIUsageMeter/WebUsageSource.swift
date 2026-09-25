@@ -49,8 +49,13 @@ enum WebUsageSource {
             if let m = w.windowMinutes { entry["window_minutes"] = m }
             rateLimits[key] = entry
         }
-        let payload: [String: Any] = ["received_at": now.timeIntervalSince1970,
+        var payload: [String: Any] = ["received_at": now.timeIntervalSince1970,
                                       "rate_limits": rateLimits]
+        // chatgpt.com names the plan ("plus", "prolite") next to the limits;
+        // keep it so the card can show it, as it does for Codex's logs.
+        if let plan = (usage as? [String: Any])?["plan_type"] as? String, !plan.isEmpty {
+            payload["plan_type"] = plan
+        }
         guard let out = try? JSONSerialization.data(withJSONObject: payload),
               (try? out.write(to: destination.reading, options: .atomic)) != nil else {
             return "could not save the reading"
