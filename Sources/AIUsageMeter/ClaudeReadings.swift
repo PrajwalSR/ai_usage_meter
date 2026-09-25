@@ -41,7 +41,7 @@ enum ClaudeReadings {
 
     /// Parses one reading file:
     ///
-    ///     { "received_at": 1789580000.0,
+    ///     { "received_at": 1789580000.0, "plan_type": "plus",   // plan optional
     ///       "rate_limits": { "five_hour": { "used_percentage": 38, "resets_at": 1789590000 },
     ///                        "seven_day": { … } } }
     ///
@@ -70,6 +70,7 @@ enum ClaudeReadings {
         guard !windows.isEmpty else { return nil }
 
         return AllowanceReading(recordedAt: Date(timeIntervalSince1970: stamp),
-                                source: source, planType: nil, windows: windows)
+                                source: source, planType: obj["plan_type"] as? String,
+                                windows: windows)
     }
 }

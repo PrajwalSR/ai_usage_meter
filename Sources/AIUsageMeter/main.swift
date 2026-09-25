@@ -137,6 +137,8 @@ final class AppController: NSObject, NSApplicationDelegate {
                 showingSettings: store.showingSettings,
                 claudeSignedIn: store.claudeSignedIn,
                 chatGPTSignedIn: store.chatGPTSignedIn,
+                accounts: store.accounts,
+                accountReadings: store.accountReadings,
                 launchAtLoginAvailable: store.launchAtLoginAvailable,
                 launchesAtLogin: store.launchesAtLogin,
                 errors: store.attentionItems,
@@ -146,6 +148,16 @@ final class AppController: NSObject, NSApplicationDelegate {
                 toggleSettings: { [weak self] in self?.store.toggleSettings() },
                 signInToClaude: { [weak self] in self?.store.signIn(to: .claude) },
                 signInToChatGPT: { [weak self] in self?.store.signIn(to: .chatGPT) },
+                addAccount: { [weak self] provider in self?.store.addAccount(provider) },
+                setPinned: { [weak self] id, pinned in self?.store.setPinned(id, pinned) },
+                setMenuValue: { [weak self] id, value in self?.store.setMenuValue(id, value) },
+                moveAccounts: { [weak self] source, destination in
+                    self?.store.moveAccounts(fromOffsets: source, toOffset: destination)
+                },
+                setMenuLabel: { [weak self] id, label in self?.store.setMenuLabel(id, label) },
+                renameAccount: { [weak self] id, label in self?.store.renameAccount(id, label) },
+                removeAccount: { [weak self] id in self?.store.removeAccount(id) },
+                signInAccount: { [weak self] id in self?.store.signInAccount(id) },
                 toggleLaunchAtLogin: { [weak self] on in self?.store.setLaunchAtLogin(on) },
                 quit: { NSApp.terminate(nil) }))
         if let hosting = popover.contentViewController as? NSHostingController<UsagePanel> {

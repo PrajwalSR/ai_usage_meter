@@ -5,7 +5,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
-SDK="$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)"
+SDK="${AI_USAGE_METER_SDK:-$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)}"
 APP="build/AI Usage Meter.app"
 
 echo "==> Compiling"

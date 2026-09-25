@@ -68,7 +68,7 @@ struct AllowanceReading: Sendable, Equatable {
 
 // MARK: - Provider state
 
-enum Provider: String, Sendable, Equatable {
+enum Provider: String, Sendable, Equatable, Codable {
     case claude, codex
 
     var displayName: String {

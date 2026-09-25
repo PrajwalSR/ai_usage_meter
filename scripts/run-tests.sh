@@ -6,7 +6,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-SDK="$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)"
+SDK="${AI_USAGE_METER_SDK:-$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)}"
 
 sources=()
 for f in Sources/AIUsageMeter/*.swift; do

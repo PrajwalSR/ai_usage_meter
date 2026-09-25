@@ -75,6 +75,9 @@ to `?` without waiting for new data.
    read" are saved in the same transaction, or not at all.
 6. **Nothing online unless asked.** The only network use is the signed-in
    website pages you chose to sign in to. The Keychain is never read.
+7. **Keep accounts separate.** Each added account has its own persistent WebKit
+   browser store and usage file. The original two accounts keep their existing
+   browser store and reading files after an upgrade.
 
 ---
 
@@ -84,13 +87,14 @@ to `?` without waiting for new data.
 |---|---|
 | `main.swift` | Entry point. `--scan` prints results; otherwise `AppController` runs the menu bar item and popover |
 | `UsageStore.swift` | Main-actor state: schedules index passes, watchers, timers, website checks; settings; menu bar text |
+| `AccountRegistry.swift` | Saves account names and pin choices; assigns stable IDs for separate browser stores |
 | `UsageIndex.swift` | One index pass: ingest (transaction) → build `UsageReport` |
 | `Database.swift` | SQLite wrapper and schema. All writes throw on failure |
 | `LogParser.swift` | Protocol shared by the log parsers |
 | `CodexParser.swift` | Codex logs → limit readings (all windows, with `limit_id`) |
 | `ClaudeReadings.swift` | Loads the Claude reading files; decides which one to show |
 | `CodexReadings.swift` | Loads the chatgpt.com reading file |
-| `WebSession.swift` | The app's own browser, one per site (claude.ai, chatgpt.com): sign-in window, and usage calls made *inside* the signed-in page |
+| `WebSession.swift` | The app's own browser, one per account: sign-in window, and usage calls made *inside* the signed-in page |
 | `WebUsageSource.swift` | Turns either site's reply into a reading file (`claude-web.json`, `codex-web.json`) |
 | `LineReader.swift` | Streaming line reader, byte keyword search, JSON helpers, file discovery |
 | `InstanceLock.swift` | One running copy at a time; `--rebuild` can't run under the app |
@@ -161,6 +165,12 @@ display time by `ClaudeReadings.choose`.
 **Usage colour** (`ProviderIcons.UsageBand`), shared by the menu bar and panel,
 from the rounded percentage: under 25% plain, 25–49% yellow, 50–79% orange,
 80%+ red.
+
+**Menu bar appearance** is per account (`Account.menuValue` / `menuLabel`,
+saved in `accounts.json`, nil meaning the default). `UsageStore.menuBarFigure`
+turns a reading into the value text for the chosen `MenuBarValue`; All limits
+joins every valid window, shortest first, so it adapts to whatever limits the
+account has. `ProviderIcons.attributed` colours each `N%` by its own band.
 
 **Headline window** (`Provider.headline`):
 - Claude: the 5-hour window if it's still valid, otherwise the shortest valid one.

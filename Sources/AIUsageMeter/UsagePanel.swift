@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Everything the panel needs, passed in as plain values. No SwiftUI state
 /// macros (they didn't build with Command Line Tools alone), and `now` is passed
@@ -10,6 +11,8 @@ struct PanelModel {
     var showingSettings: Bool
     var claudeSignedIn: Bool
     var chatGPTSignedIn: Bool
+    var accounts: [Account]
+    var accountReadings: [UUID: ProviderReading]
     var launchAtLoginAvailable: Bool
     var launchesAtLogin: Bool
     var errors: [String]
@@ -21,6 +24,15 @@ struct PanelActions {
     var toggleSettings: () -> Void
     var signInToClaude: () -> Void
     var signInToChatGPT: () -> Void
+    var addAccount: (Provider) -> Void
+    var setPinned: (UUID, Bool) -> Void
+    var setMenuValue: (UUID, MenuBarValue) -> Void = { _, _ in }
+    /// Reorder from the accounts list (SwiftUI `onMove` indices).
+    var moveAccounts: (IndexSet, Int) -> Void = { _, _ in }
+    var setMenuLabel: (UUID, MenuBarLabel) -> Void = { _, _ in }
+    var renameAccount: (UUID, String) -> Void
+    var removeAccount: (UUID) -> Void
+    var signInAccount: (UUID) -> Void
     var toggleLaunchAtLogin: (Bool) -> Void
     var quit: () -> Void
 }
@@ -34,11 +46,14 @@ struct UsagePanel: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             Divider()
-            if model.showingSettings {
-                SettingsPage(model: model, actions: actions)
-            } else {
-                usagePage
+            ScrollView {
+                if model.showingSettings {
+                    SettingsPage(model: model, actions: actions)
+                } else {
+                    usagePage
+                }
             }
+            .frame(maxHeight: 620)
         }
         .padding(14)
         .frame(width: 340)
@@ -68,8 +83,24 @@ struct UsagePanel: View {
     private var usagePage: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let report = model.report {
-                if let codex = report.codex { ProviderCard(reading: codex, now: model.now) }
-                if let claude = report.claude { ProviderCard(reading: claude, now: model.now) }
+                if model.accounts.isEmpty {
+                    if let codex = report.codex { ProviderCard(reading: codex, now: model.now) }
+                    if let claude = report.claude { ProviderCard(reading: claude, now: model.now) }
+                } else {
+                    ForEach(model.accounts, id: \.id) { account in
+                        if let reading = model.accountReadings[account.id] {
+                            ProviderCard(reading: reading, now: model.now, accountLabel: account.label)
+                        } else {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(account.label).font(.subheadline.weight(.semibold))
+                                Text("Waiting for a usage reading").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+                        }
+                    }
+                }
 
                 // Anything needing attention is one short line with a way to fix
                 // it; the details live in Settings.
@@ -109,10 +140,38 @@ struct SettingsPage: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Accounts").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                accountRow(name: "Claude", detail: "claude.ai · every minute",
-                           signedIn: model.claudeSignedIn, signIn: actions.signInToClaude)
-                accountRow(name: "ChatGPT", detail: "chatgpt.com · every minute",
-                           signedIn: model.chatGPTSignedIn, signIn: actions.signInToChatGPT)
+                if model.accounts.isEmpty {
+                    accountRow(name: "Claude", detail: "claude.ai · every minute",
+                               signedIn: model.claudeSignedIn, signIn: actions.signInToClaude)
+                    accountRow(name: "ChatGPT", detail: "chatgpt.com · every minute",
+                               signedIn: model.chatGPTSignedIn, signIn: actions.signInToChatGPT)
+                } else {
+                    // A native list, so dragging a card slides the others aside
+                    // and shows where it will land. The usage cards and menu bar
+                    // items follow this order. A List has no height of its own
+                    // inside the popover, so each row has a fixed height and the
+                    // list is sized to fit them all.
+                    List {
+                        ForEach(model.accounts, id: \.id) { account in
+                            AccountSettingsRow(account: account, actions: actions)
+                                .frame(height: AccountSettingsRow.height(account), alignment: .top)
+                                // The list's own ~16 pt side inset stays: row cells
+                                // clip anything wider, cutting off the card edges.
+                                .listRowInsets(EdgeInsets(top: 3, leading: 0, bottom: 3, trailing: 0))
+                                .listRowSeparator(.hidden)
+                        }
+                        .onMove { actions.moveAccounts($0, $1) }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .scrollDisabled(true)
+                    .frame(height: model.accounts.map { AccountSettingsRow.height($0) + 6 }.reduce(0, +))
+                }
+                HStack {
+                    Button("Add Claude account") { actions.addAccount(.claude) }
+                    Button("Add Codex account") { actions.addAccount(.codex) }
+                }
+                .font(.caption)
                 Text("Sign-in happens on the provider's own page, in a window this app owns. "
                      + "Use email: Google sign-in doesn't work in app windows.")
                     .font(.caption2).foregroundStyle(.secondary)
@@ -148,7 +207,7 @@ struct SettingsPage: View {
             HStack(spacing: 5) {
                 Circle().fill(model.isWatching ? Color.green : Color.orange)
                     .frame(width: 6, height: 6)
-                Text(model.isWatching ? "Watching Codex logs" : "Not watching logs")
+                Text(model.isWatching ? "Codex log backup active" : "Codex log backup unavailable")
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Button("Quit", action: actions.quit).buttonStyle(.borderless).font(.caption)
@@ -176,16 +235,106 @@ struct SettingsPage: View {
     }
 }
 
+private struct AccountSettingsRow: View {
+    let account: Account
+    let actions: PanelActions
+
+    /// Fixed so the accounts list can be sized; pinned rows have the
+    /// appearance menus as a third line.
+    static func height(_ account: Account) -> CGFloat { account.pinned ? 92 : 64 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(.secondary)
+                    .help("Drag to reorder")
+                Text(account.provider == .claude ? "Claude" : "Codex")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Toggle("Pin", isOn: Binding(get: { account.pinned },
+                                             set: { actions.setPinned(account.id, $0) }))
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+            }
+            HStack {
+                Text(account.label)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button("Rename", action: rename)
+                    .font(.caption)
+                Button("Sign in") { actions.signInAccount(account.id) }
+                    .font(.caption)
+                if !account.isLegacy {
+                    Button(role: .destructive, action: remove) {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Remove \(account.label)")
+                }
+            }
+            // How it looks in the menu bar; only matters while pinned.
+            if account.pinned {
+                HStack(spacing: 6) {
+                    Picker("", selection: Binding(get: { account.labelStyle },
+                                                  set: { actions.setMenuLabel(account.id, $0) })) {
+                        ForEach(MenuBarLabel.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    .help("What identifies this account in the menu bar")
+                    Picker("", selection: Binding(get: { account.value },
+                                                  set: { actions.setMenuValue(account.id, $0) })) {
+                        ForEach(MenuBarValue.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    .help("What this account shows in the menu bar")
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .font(.caption)
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func rename() {
+        let alert = NSAlert()
+        alert.messageText = "Rename account"
+        alert.informativeText = "Choose a name to tell your accounts apart."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(string: account.label)
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let label = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !label.isEmpty && label != account.label { actions.renameAccount(account.id, label) }
+    }
+
+    private func remove() {
+        let alert = NSAlert()
+        alert.messageText = "Remove \(account.label)?"
+        alert.informativeText = "You can add this account again later by signing in."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        actions.removeAccount(account.id)
+    }
+}
+
 // MARK: - One provider's card
 
 struct ProviderCard: View {
     let reading: ProviderReading
     let now: Date
+    var accountLabel: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                Text(reading.providerName).font(.subheadline.weight(.semibold))
+                Text(accountLabel ?? reading.providerName).font(.subheadline.weight(.semibold))
                 if let plan = planLabel {
                     Text(plan).font(.caption2)
                         .padding(.horizontal, 5).padding(.vertical, 1)
