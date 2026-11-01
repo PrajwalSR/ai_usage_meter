@@ -271,7 +271,7 @@ app drops it rather than show a stale 0%.
 |---|---|
 | Live Claude and ChatGPT numbers | ⚙ → **Accounts** → **Sign in** |
 | Start at login | ⚙ → **Open at login** |
-| Show your Claude plan name | `defaults write local.aiusagemeter claudePlanLabel "Pro"` |
+| Show your Claude plan name | `defaults write io.github.prajwalsr.aiusagemeter claudePlanLabel "Pro"` |
 | Start fresh | Quit the app, then run `./build/AIUsageMeter --scan --rebuild`, or delete `~/Library/Application Support/AIUsageMeter/`. Open it again. |
 
 ---
@@ -285,7 +285,6 @@ app drops it rather than show a stale 0%.
 | [docs/DATA-SOURCES.md](docs/DATA-SOURCES.md) | The exact files, fields and addresses the app uses |
 | [SECURITY.md](SECURITY.md) | What the app touches and how it keeps it safe |
 | [assets/README.md](assets/README.md) | Icons, logos and how to rebuild the app icon |
-| [docs/OPEN-SOURCE-CHECKLIST.md](docs/OPEN-SOURCE-CHECKLIST.md) | Things to do before making this public |
 
 Quick commands:
 

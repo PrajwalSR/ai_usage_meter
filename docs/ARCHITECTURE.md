@@ -301,5 +301,5 @@ Why each piece exists:
 1. `swiftc -O` every file in `Sources/AIUsageMeter/` for `arm64-apple-macosx14.0`.
    SQLite3 is linked automatically.
 2. Assembles `build/AI Usage Meter.app`: binary, `Info.plist` (`LSUIElement`, bundle
-   id `local.aiusagemeter`), `AppIcon.icns`, the two logo SVGs.
+   id `io.github.prajwalsr.aiusagemeter`), `AppIcon.icns`, the two logo SVGs.
 3. Signs it ad hoc (`codesign --sign -`).

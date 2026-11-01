@@ -15,10 +15,6 @@ Use GitHub's private reporting instead: on the repository page, go to
 **Security → Report a vulnerability**. Include what you found and how to reproduce
 it. Please give reasonable time for a fix before sharing it publicly.
 
-> Maintainer note: private reporting has to be switched on first, under
-> **Settings → Code security → Private vulnerability reporting**. See
-> [docs/OPEN-SOURCE-CHECKLIST.md](docs/OPEN-SOURCE-CHECKLIST.md).
-
 ---
 
 ## What the app touches

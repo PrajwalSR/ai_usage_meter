@@ -30,7 +30,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <dict>
   <key>CFBundleName</key><string>AI Usage Meter</string>
   <key>CFBundleDisplayName</key><string>AI Usage Meter</string>
-  <key>CFBundleIdentifier</key><string>local.aiusagemeter</string>
+  <key>CFBundleIdentifier</key><string>io.github.prajwalsr.aiusagemeter</string>
   <key>CFBundleExecutable</key><string>AIUsageMeter</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>

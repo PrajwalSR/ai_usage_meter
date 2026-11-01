@@ -28,4 +28,17 @@ enum LegacyCleanup {
         try? FileManager.default.removeItem(
             at: ClaudeReadings.directory.appendingPathComponent("claude-live.json"))
     }
+
+    /// Builds before the bundle id became `io.github.prajwalsr.aiusagemeter` kept
+    /// their settings under `local.aiusagemeter`. Copied over once, on the first
+    /// launch that finds no settings of its own, so nothing is switched off.
+    static func migrateLegacyDefaults() {
+        let old = "local.aiusagemeter"
+        let defaults = UserDefaults.standard
+        guard let id = Bundle.main.bundleIdentifier, id != old,
+              defaults.persistentDomain(forName: id)?.isEmpty ?? true,
+              let values = defaults.persistentDomain(forName: old), !values.isEmpty
+        else { return }
+        defaults.setPersistentDomain(values, forName: id)
+    }
 }

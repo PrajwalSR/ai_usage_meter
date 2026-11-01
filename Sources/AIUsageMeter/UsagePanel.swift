@@ -353,7 +353,7 @@ struct ProviderCard: View {
     /// Codex logs give an internal id (`prolite` = ChatGPT Pro 5x). Claude's data
     /// has no plan at all, so its badge is an optional setting, hidden when unset:
     ///
-    ///     defaults write local.aiusagemeter claudePlanLabel "Pro"
+    ///     defaults write io.github.prajwalsr.aiusagemeter claudePlanLabel "Pro"
     private var planLabel: String? {
         if reading.provider == .claude {
             let label = UserDefaults.standard.string(forKey: "claudePlanLabel")
