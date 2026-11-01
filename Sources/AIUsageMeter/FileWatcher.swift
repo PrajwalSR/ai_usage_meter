@@ -4,7 +4,7 @@ import Foundation
 /// period, so a burst of writes during an active turn triggers one rescan.
 final class FileWatcher {
     private var stream: FSEventStreamRef?
-    private let queue = DispatchQueue(label: "local.aiusagemeter.fsevents")
+    private let queue = DispatchQueue(label: "io.github.prajwalsr.aiusagemeter.fsevents")
     private let debounce: TimeInterval
     private var pending: DispatchWorkItem?
     private let onChange: () -> Void

@@ -48,6 +48,7 @@ final class UsageStore {
         // header). Only reports a problem if removal fails.
         indexError = LegacyCleanup.removeLegacyURLCache()
         LegacyCleanup.removeLegacyLiveReading()
+        LegacyCleanup.migrateLegacyDefaults()
 
         do {
             index = try UsageIndex()
