@@ -299,7 +299,7 @@ Quick commands:
 
 ## License
 
-No license chosen yet, so all rights are reserved for now.
+MIT. See [LICENSE](LICENSE).
 
 Claude and Anthropic are trademarks of Anthropic. OpenAI, ChatGPT and Codex are
 trademarks of OpenAI. This project isn't made by or connected to either company.
