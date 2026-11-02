@@ -28,7 +28,7 @@ So I built my own.
 | Claude | `38% in 2h 21m` | You used 38% of your **5-hour** Claude limit. It resets in 2 hours 21 minutes. |
 | Either | `?` | The last number is out of date because the limit has reset since then. It's not shown as 0%. |
 | Either | `—` | No number available yet. |
-| Either | `26% ⚠︎` | That account's website isn't answering or you're signed out. The number is the last one the app had; open the panel to see what's wrong. |
+| Either | `⚠︎` | You're signed out of that account's website, or it isn't answering. Open the panel to see what's wrong. |
 
 The percentage changes color as you use more:
 
