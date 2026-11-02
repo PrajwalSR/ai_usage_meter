@@ -121,6 +121,11 @@ final class WebSession: NSObject {
     private var loginWindow: NSWindow?
     private var pendingLoad: [(Bool) -> Void] = []
 
+    /// How long one usage check may take. A page that never finishes loading,
+    /// or a request that never answers, would otherwise leave the check
+    /// pending forever: no error, and no further checks for this account.
+    static let fetchTimeout: TimeInterval = 45
+
     /// Exposes the actual WebKit store identifier for isolation checks.
     var websiteDataStoreIdentifier: UUID? {
         makeWebView().configuration.websiteDataStore.identifier
@@ -183,11 +188,38 @@ final class WebSession: NSObject {
         view.load(URLRequest(url: home))
     }
 
+    /// Drops a page that stopped responding, so the next check starts fresh.
+    /// Left alone while the user is signing in, so the window isn't emptied
+    /// under them.
+    private func resetPage() {
+        pendingLoad = []
+        guard loginWindow?.isVisible != true else { return }
+        webView?.stopLoading()
+        loginWindow?.contentView = nil
+        loginWindow = nil
+        webView = nil
+    }
+
     // MARK: - Reading usage
 
     /// Runs the website's own usage calls inside the page and returns the raw
     /// JSON, so the response shape can be inspected before it is mapped.
     func fetchRawUsage(completion: @escaping (Result<String, WebFailure>) -> Void) {
+        // Whichever comes first, the answer or the time limit, wins; the other
+        // is ignored.
+        var finished = false
+        let completion: (Result<String, WebFailure>) -> Void = { result in
+            guard !finished else { return }
+            finished = true
+            completion(result)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.fetchTimeout) { [weak self] in
+            guard let self, !finished else { return }
+            Self.log("\(self.siteName): no answer after \(Int(Self.fetchTimeout))s, reloading the page")
+            self.resetPage()
+            completion(.failure(.pageError("\(self.siteName) didn't respond. Trying again shortly.")))
+        }
+
         loadSiteIfNeeded { [weak self] ok in
             guard let self, ok else {
                 return completion(.failure(.pageError("could not load \(self?.siteName ?? "the site")")))
@@ -280,6 +312,16 @@ extension WebSession: WKNavigationDelegate {
             let waiting = self.pendingLoad
             self.pendingLoad = []
             waiting.forEach { $0(true) }
+        }
+    }
+
+    /// The page couldn't even start loading: offline, or just woken from sleep.
+    nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                             withError error: Error) {
+        Task { @MainActor in
+            let waiting = self.pendingLoad
+            self.pendingLoad = []
+            waiting.forEach { $0(false) }
         }
     }
 
