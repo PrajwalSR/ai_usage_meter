@@ -359,10 +359,12 @@ final class UsageStore {
         let figures: [(Provider, ProviderIcons.MenuBarFigure)] = accounts
             .filter(\.pinned).compactMap { account in
                 guard let reading = readings[account.id] else { return nil }
-                var figure = Self.menuBarFigure(reading, now: now, value: account.value)
-                // Something is wrong with this account's website: say so where
-                // the number is, not only inside the panel.
-                if webErrors[account.id] != nil { figure.text += " ⚠︎" }
+                // Something is wrong with this account's website (signed out,
+                // not answering): a warning instead of a number that may be old.
+                // The panel says what's wrong.
+                var figure = webErrors[account.id] != nil
+                    ? ProviderIcons.MenuBarFigure(text: "⚠︎")
+                    : Self.menuBarFigure(reading, now: now, value: account.value)
                 figure.name = account.labelStyle.showsName ? account.label : nil
                 figure.showsLogo = account.labelStyle.showsLogo
                 return (account.provider, figure)
