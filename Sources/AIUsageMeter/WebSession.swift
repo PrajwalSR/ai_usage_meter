@@ -45,19 +45,74 @@ final class WebSession: NSObject {
                            label: "Codex", pinned: true))
     }
 
-    /// Delete a removed account's persistent sign-in. The original default
-    /// store is shared by both providers, so it is left alone for legacy IDs.
-    static func removeAccountData(_ account: Account, completion: @escaping (Error?) -> Void) {
-        if let session = sessions.removeValue(forKey: account.id) {
-            session.closeLoginWindow()
-            session.loginWindow?.contentView = nil
-            session.loginWindow = nil
-            session.webView = nil
+    /// Sites whose data belongs to each provider, for clearing one provider's
+    /// sign-in out of the default store the original two accounts share.
+    private static func siteDomains(_ provider: Provider) -> [String] {
+        provider == .claude ? ["claude.ai", "anthropic.com"] : ["chatgpt.com", "openai.com"]
+    }
+
+    /// Signs the account out: erases its cookies and site data, and drops the
+    /// page so the next sign-in starts clean. The account itself stays.
+    static func signOut(_ account: Account, completion: @escaping @Sendable () -> Void) {
+        if let session = sessions.removeValue(forKey: account.id) { session.discardPage() }
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        guard account.isLegacy else {
+            WKWebsiteDataStore(forIdentifier: account.id)
+                .removeData(ofTypes: types, modifiedSince: .distantPast, completionHandler: completion)
+            return
         }
-        guard !account.isLegacy else { completion(nil); return }
-        WKWebsiteDataStore.remove(forIdentifier: account.id) { error in
-            completion(error)
+        // The default store also holds the other provider's sign-in: only
+        // this provider's sites are removed.
+        let store = WKWebsiteDataStore.default()
+        store.fetchDataRecords(ofTypes: types) { records in
+            let domains = siteDomains(account.provider)
+            let mine = records.filter { r in domains.contains { r.displayName.hasSuffix($0) } }
+            store.removeData(ofTypes: types, for: mine, completionHandler: completion)
         }
+    }
+
+    /// Deletes a removed account's sign-in. WebKit refuses while a page still
+    /// uses the store ("Data store is in use"), so it is tried again a little
+    /// later; anything still left is deleted at the next launch by
+    /// `removeOrphanedStores`.
+    static func removeAccountData(_ account: Account) {
+        signOut(account) {}
+        guard !account.isLegacy else { return }
+        func attempt(_ delays: [TimeInterval]) {
+            WKWebsiteDataStore.remove(forIdentifier: account.id) { error in
+                guard error != nil, let next = delays.first else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + next) { attempt(Array(delays.dropFirst())) }
+            }
+        }
+        attempt([5, 60])
+    }
+
+    /// At launch, before any page exists: deletes stores whose account is gone.
+    /// Done on the folders directly: WebKit's own store listing crashes when
+    /// asked before WebKit has started, and nothing uses these folders yet.
+    static func removeOrphanedStores(keeping accounts: [Account]) {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let keep = Set(accounts.map(\.id))
+        let fm = FileManager.default
+        let stores = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/WebKit/\(bundleID)/WebsiteDataStore", isDirectory: true)
+        for name in (try? fm.contentsOfDirectory(atPath: stores.path)) ?? [] {
+            guard let id = UUID(uuidString: name), !keep.contains(id) else { continue }
+            do {
+                try fm.removeItem(at: stores.appendingPathComponent(name))
+            } catch {
+                log("could not delete a removed account's sign-in: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func discardPage() {
+        closeLoginWindow()
+        pendingLoad = []
+        webView?.stopLoading()
+        loginWindow?.contentView = nil
+        loginWindow = nil
+        webView = nil
     }
 
     /// claude.ai: usage for the Claude account.

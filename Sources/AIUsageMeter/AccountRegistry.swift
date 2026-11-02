@@ -91,7 +91,8 @@ final class AccountRegistry {
             // Ignore duplicate IDs in a damaged file. Never merge distinct accounts.
             var seen = Set<UUID>()
             accounts = loaded.filter { seen.insert($0.id).inserted }
-            for legacy in Self.defaultAccounts where !seen.contains(legacy.id) {
+            let removed = Self.removedLegacyIDs
+            for legacy in Self.defaultAccounts where !seen.contains(legacy.id) && !removed.contains(legacy.id) {
                 accounts.insert(legacy, at: 0)
             }
         } else {
@@ -138,11 +139,23 @@ final class AccountRegistry {
     }
 
     /// Removing an account removes its list entry. Call `WebSession.removeAccountData`
-    /// as well to erase its browser sign-in. The legacy default store is shared
-    /// with the original build, so clearing it could sign out the other provider.
+    /// as well to erase its browser sign-in.
     func remove(id: UUID) {
         accounts.removeAll { $0.id == id }
+        // The original two are otherwise put back at every launch.
+        if id == Self.legacyClaudeID || id == Self.legacyCodexID {
+            Self.removedLegacyIDs.insert(id)
+        }
         save()
+    }
+
+    /// The original accounts the user removed, so they stay removed.
+    private static let removedLegacyKey = "removedLegacyAccounts"
+    static var removedLegacyIDs: Set<UUID> {
+        get {
+            Set((UserDefaults.standard.stringArray(forKey: removedLegacyKey) ?? []).compactMap(UUID.init))
+        }
+        set { UserDefaults.standard.set(newValue.map(\.uuidString).sorted(), forKey: removedLegacyKey) }
     }
 
     private func save() {

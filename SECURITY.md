@@ -99,8 +99,8 @@ Why it is built this way:
    usage call needs a bearer token, which the site hands to its own pages at
    `/api/auth/session`. The script fetches it and uses it *inside the page*, then
    returns only the usage reply, so the token never reaches the app.
-4. **Signing out inside the window removes the session**, as does deleting
-   `~/Library/Application Support/AIUsageMeter/`.
+4. **Sign out (⚙ → Accounts) removes the session**: that account's cookies and
+   site data are erased. Removing an account also deletes its browser storage.
 
 ### What to be aware of
 
@@ -169,7 +169,7 @@ login. Logins also expire on their own.
 | Risk | What it means |
 |---|---|
 | Website endpoints are unofficial | claude.ai or chatgpt.com could change them. Numbers would stop updating; nothing becomes unsafe. |
-| A signed-in session sits in the app's storage | Same exposure as being signed in to those sites in a browser on this Mac. Sign out in the window to remove it. |
+| A signed-in session sits in the app's storage | Same exposure as being signed in to those sites in a browser on this Mac. Click **Sign out** on the account to remove it. |
 | Not signed by Apple | Fine when you build it yourself. Downloads you share should be signed and notarized. |
 | Malware on your Mac | Anything running as your user can already read these files and your browser sessions. This app neither adds nor removes that risk. |
 

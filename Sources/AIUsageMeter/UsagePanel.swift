@@ -13,6 +13,7 @@ struct PanelModel {
     var chatGPTSignedIn: Bool
     var accounts: [Account]
     var accountReadings: [UUID: ProviderReading]
+    var signedInAccounts: Set<UUID> = []
     var launchAtLoginAvailable: Bool
     var launchesAtLogin: Bool
     var errors: [String]
@@ -33,6 +34,7 @@ struct PanelActions {
     var renameAccount: (UUID, String) -> Void
     var removeAccount: (UUID) -> Void
     var signInAccount: (UUID) -> Void
+    var signOutAccount: (UUID) -> Void = { _ in }
     var toggleLaunchAtLogin: (Bool) -> Void
     var quit: () -> Void
 }
@@ -153,7 +155,8 @@ struct SettingsPage: View {
                     // list is sized to fit them all.
                     List {
                         ForEach(model.accounts, id: \.id) { account in
-                            AccountSettingsRow(account: account, actions: actions)
+                            AccountSettingsRow(account: account, signedIn: model.signedInAccounts.contains(account.id),
+                                               actions: actions)
                                 .frame(height: AccountSettingsRow.height(account), alignment: .top)
                                 // The list's own ~16 pt side inset stays: row cells
                                 // clip anything wider, cutting off the card edges.
@@ -237,6 +240,7 @@ struct SettingsPage: View {
 
 private struct AccountSettingsRow: View {
     let account: Account
+    let signedIn: Bool
     let actions: PanelActions
 
     /// Fixed so the accounts list can be sized; pinned rows have the
@@ -265,15 +269,18 @@ private struct AccountSettingsRow: View {
                 Spacer()
                 Button("Rename", action: rename)
                     .font(.caption)
-                Button("Sign in") { actions.signInAccount(account.id) }
-                    .font(.caption)
-                if !account.isLegacy {
-                    Button(role: .destructive, action: remove) {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Remove \(account.label)")
+                if signedIn {
+                    Button("Sign out", action: signOut)
+                        .font(.caption)
+                } else {
+                    Button("Sign in") { actions.signInAccount(account.id) }
+                        .font(.caption)
                 }
+                Button(role: .destructive, action: remove) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Remove \(account.label)")
             }
             // How it looks in the menu bar; only matters while pinned.
             if account.pinned {
@@ -311,6 +318,16 @@ private struct AccountSettingsRow: View {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let label = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !label.isEmpty && label != account.label { actions.renameAccount(account.id, label) }
+    }
+
+    private func signOut() {
+        let alert = NSAlert()
+        alert.messageText = "Sign out of \(account.label)?"
+        alert.informativeText = "The app stops checking this account's website until you sign in again."
+        alert.addButton(withTitle: "Sign out")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        actions.signOutAccount(account.id)
     }
 
     private func remove() {

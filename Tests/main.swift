@@ -642,5 +642,20 @@ test("Accounts saved before appearance settings load with the default look") {
     check(accounts?.first?.labelStyle == .logoAndName, "default label style")
 }
 
+test("A removed original account stays removed after relaunch") {
+    MainActor.assumeIsolated {
+    let saved = AccountRegistry.removedLegacyIDs
+    defer { AccountRegistry.removedLegacyIDs = saved }
+    AccountRegistry.removedLegacyIDs = []
+    let url = tmp.appendingPathComponent("accounts-removed.json")
+    AccountRegistry(fileURL: url).remove(id: AccountRegistry.legacyCodexID)
+    let reopened = AccountRegistry(fileURL: url)
+    check(!reopened.accounts.contains(where: { $0.id == AccountRegistry.legacyCodexID }),
+          "the original Codex account should not be put back")
+    check(reopened.accounts.contains(where: { $0.id == AccountRegistry.legacyClaudeID }),
+          "the other original account is untouched")
+    }
+}
+
 print("\n\(passed) checks passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

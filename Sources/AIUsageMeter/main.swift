@@ -139,6 +139,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 chatGPTSignedIn: store.chatGPTSignedIn,
                 accounts: store.accounts,
                 accountReadings: store.accountReadings,
+                signedInAccounts: store.signedInAccounts,
                 launchAtLoginAvailable: store.launchAtLoginAvailable,
                 launchesAtLogin: store.launchesAtLogin,
                 errors: store.attentionItems,
@@ -146,8 +147,8 @@ final class AppController: NSObject, NSApplicationDelegate {
             actions: PanelActions(
                 refresh: { [weak self] in self?.store.refreshAll() },
                 toggleSettings: { [weak self] in self?.store.toggleSettings() },
-                signInToClaude: { [weak self] in self?.store.signIn(to: .claude) },
-                signInToChatGPT: { [weak self] in self?.store.signIn(to: .chatGPT) },
+                signInToClaude: { [weak self] in self?.store.signIn(toProvider: .claude) },
+                signInToChatGPT: { [weak self] in self?.store.signIn(toProvider: .codex) },
                 addAccount: { [weak self] provider in self?.store.addAccount(provider) },
                 setPinned: { [weak self] id, pinned in self?.store.setPinned(id, pinned) },
                 setMenuValue: { [weak self] id, value in self?.store.setMenuValue(id, value) },
@@ -158,6 +159,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 renameAccount: { [weak self] id, label in self?.store.renameAccount(id, label) },
                 removeAccount: { [weak self] id in self?.store.removeAccount(id) },
                 signInAccount: { [weak self] id in self?.store.signInAccount(id) },
+                signOutAccount: { [weak self] id in self?.store.signOutAccount(id) },
                 toggleLaunchAtLogin: { [weak self] on in self?.store.setLaunchAtLogin(on) },
                 quit: { NSApp.terminate(nil) }))
         if let hosting = popover.contentViewController as? NSHostingController<UsagePanel> {

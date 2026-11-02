@@ -28,6 +28,7 @@ So I built my own.
 | Claude | `38% in 2h 21m` | You used 38% of your **5-hour** Claude limit. It resets in 2 hours 21 minutes. |
 | Either | `?` | The last number is out of date because the limit has reset since then. It's not shown as 0%. |
 | Either | `—` | No number available yet. |
+| Either | `26% ⚠︎` | That account's website isn't answering or you're signed out. The number is the last one the app had; open the panel to see what's wrong. |
 
 The percentage changes color as you use more:
 
@@ -213,7 +214,7 @@ flowchart TB
 | Does it contact the internet? | Only claude.ai and chatgpt.com, about once a minute per signed-in account, for usage. Nothing else, ever. |
 | Does it read my chats? | **It never opens Claude Code's logs.** It reads Codex's logs, which do hold your Codex conversations, but only looks at lines carrying the limit numbers and saves only those. |
 | Does it track me? | No. No analytics, no tracking, no crash reports. |
-| How do I sign out? | Open the sign-in window and sign out there, or delete `~/Library/Application Support/AIUsageMeter/`. |
+| How do I sign out? | ⚙ → **Accounts** → **Sign out** on that account. It erases that account's cookies and site data; **Remove** (the bin) also drops the account. |
 
 Full details: [SECURITY.md](SECURITY.md).
 
@@ -255,7 +256,7 @@ app drops it rather than show a stale 0%.
 | What you see | What to do |
 |---|---|
 | "Continue with Google" shows a sign-in error | Google blocks sign-in inside app windows. Use the email option. |
-| An account shows **Sign in** again | That site's session expired. Click **Sign in** and sign in once more. |
+| An account shows **Sign in** again, or `⚠︎` in the menu bar | That site's session expired or it stopped answering. Click **Sign in** and sign in once more. |
 | Claude says "Usage unavailable" | Sign in to Claude under ⚙ → Accounts, or set up [the status line](#claude-without-signing-in). |
 | ChatGPT number is old, or shows `?` | Sign in to ChatGPT under ⚙ → Accounts, or use Codex once and it updates. |
 | Claude's 5-hour row is missing | The last reading is older than 5 hours, so it can't be trusted. It returns at the next successful check. |
