@@ -137,17 +137,19 @@ You don't need a paid Apple Developer account.
 2. Under **Accounts**, click **Sign in** next to Claude or ChatGPT.
 3. That site's real sign-in page opens in a window this app owns. Sign in with
    **your email**.
-4. Once the app gets its first number, the window closes by itself and the
-   numbers update every minute.
+4. As soon as you're signed in and the app gets its first number, the window
+   closes by itself and the numbers update every minute.
 
 For another account, click **Add Claude account** or **Add Codex account** under
-**Accounts**, then sign in to that account. Rename it so you can tell your
-accounts apart. Tick **Pin** on any accounts you want to see in the menu bar;
+**Accounts**, then sign in to that account. Click **Rename** to edit its name
+right there in the list, so you can tell your accounts apart. Tick **Pin** on any accounts you want to see in the menu bar;
 you can pin as many as you like, though macOS may hide menu bar items if there
 isn't enough screen space. Unpinned accounts remain in the dropdown and keep
 updating. Drag an account up or down to change the order; the others slide
 aside and a line shows where it will land. The usage cards and menu bar items
-follow it. Removing an added account also clears its saved sign-in on this Mac.
+follow it. **Sign out** erases an account's saved sign-in but keeps it in the
+list; the bin icon removes any account, including the first two, and clears its
+saved sign-in on this Mac.
 
 > **"Continue with Google" will not work here.** Google refuses to sign you in
 > inside an app window like this one. Use the email option.

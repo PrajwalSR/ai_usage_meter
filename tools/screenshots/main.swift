@@ -58,6 +58,7 @@ MainActor.assumeIsolated {
             model: PanelModel(report: sample, isScanning: false, isWatching: true,
                               showingSettings: settings, claudeSignedIn: true, chatGPTSignedIn: true,
                               accounts: sampleAccounts, accountReadings: sampleReadings,
+                              signedInAccounts: Set(sampleAccounts.map(\.id)),
                               launchAtLoginAvailable: true,
                               launchesAtLogin: true, errors: [], now: now),
             actions: PanelActions(refresh: {}, toggleSettings: {}, signInToClaude: {},
