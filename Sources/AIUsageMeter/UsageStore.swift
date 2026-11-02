@@ -160,6 +160,9 @@ final class UsageStore {
     /// Opens that provider's own sign-in page in a window this app owns.
     func signIn(to provider: WebProvider) {
         UserDefaults.standard.set(true, forKey: Self.enabledKey(provider))
+        // As soon as the site shows anything but its sign-in pages, check:
+        // success closes the window instead of leaving the user in the chat.
+        provider.session.onLeftSignInPages = { [weak self] in self?.fetchWebUsage(provider) }
         provider.session.showLoginWindow()
         // Give the sign-in a moment, then start checking.
         Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in
@@ -297,6 +300,8 @@ final class UsageStore {
                     provider.session.closeLoginWindow()
                     self.refresh()
                 case .failure(let failure):
+                    // Mid sign-in, "not signed in" is expected, not a problem.
+                    guard !provider.session.isSigningIn else { return }
                     self.webErrors[provider.account.id] = "\(provider.account.label): \(failure.description)"
                     self.onChange?()
                 }
