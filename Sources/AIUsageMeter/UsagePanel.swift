@@ -14,6 +14,8 @@ struct PanelModel {
     var accounts: [Account]
     var accountReadings: [UUID: ProviderReading]
     var signedInAccounts: Set<UUID> = []
+    /// What is wrong with an account's website, if anything.
+    var accountErrors: [UUID: String] = [:]
     var launchAtLoginAvailable: Bool
     var launchesAtLogin: Bool
     var errors: [String]
@@ -90,7 +92,12 @@ struct UsagePanel: View {
                     if let claude = report.claude { ProviderCard(reading: claude, now: model.now) }
                 } else {
                     ForEach(model.accounts, id: \.id) { account in
-                        if let reading = model.accountReadings[account.id] {
+                        if let problem = model.accountErrors[account.id] {
+                            // Signed out or not answering: no number, which
+                            // could be old, just what's wrong and the fix.
+                            AccountProblemCard(account: account, problem: problem,
+                                               signIn: { actions.signInAccount(account.id) })
+                        } else if let reading = model.accountReadings[account.id] {
                             ProviderCard(reading: reading, now: model.now, accountLabel: account.label)
                         } else {
                             VStack(alignment: .leading, spacing: 4) {
@@ -338,6 +345,34 @@ private struct AccountSettingsRow: View {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         actions.removeAccount(account.id)
+    }
+}
+
+// MARK: - An account whose website isn't working
+
+private struct AccountProblemCard: View {
+    let account: Account
+    let problem: String
+    let signIn: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(account.label).font(.subheadline.weight(.semibold))
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+            Button("Sign in", action: signIn).font(.caption)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    /// The stored message starts with the account's name, already shown above.
+    private var message: String {
+        let prefix = "\(account.label): "
+        return problem.hasPrefix(prefix) ? String(problem.dropFirst(prefix.count)) : problem
     }
 }
 

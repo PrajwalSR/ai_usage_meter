@@ -140,6 +140,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 accounts: store.accounts,
                 accountReadings: store.accountReadings,
                 signedInAccounts: store.signedInAccounts,
+                accountErrors: store.webErrors,
                 launchAtLoginAvailable: store.launchAtLoginAvailable,
                 launchesAtLogin: store.launchesAtLogin,
                 errors: store.attentionItems,
