@@ -176,6 +176,22 @@ final class WebSession: NSObject {
     private var loginWindow: NSWindow?
     private var pendingLoad: [(Bool) -> Void] = []
 
+    /// Called when the sign-in window lands on a page of the site that isn't
+    /// part of signing in (after sign-in the site opens its chat), so the
+    /// owner can check usage right away and close the window.
+    var onLeftSignInPages: (() -> Void)?
+
+    /// Whether the sign-in window is open, so a failed check during sign-in
+    /// isn't reported as a problem.
+    var isSigningIn: Bool { loginWindow?.isVisible == true }
+
+    /// Login, sign-up and verification pages on either site.
+    private static func isSignInPage(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        return ["login", "log-in", "signin", "sign-in", "signup", "auth", "verify", "magic-link", "oauth"]
+            .contains { path.contains($0) }
+    }
+
     /// How long one usage check may take. A page that never finishes loading,
     /// or a request that never answers, would otherwise leave the check
     /// pending forever: no error, and no further checks for this account.
@@ -367,6 +383,10 @@ extension WebSession: WKNavigationDelegate {
             let waiting = self.pendingLoad
             self.pendingLoad = []
             waiting.forEach { $0(true) }
+            if self.isSigningIn, let url = webView.url, url.host == self.home.host,
+               !Self.isSignInPage(url) {
+                self.onLeftSignInPages?()
+            }
         }
     }
 

@@ -250,6 +250,11 @@ private struct AccountSettingsRow: View {
     let signedIn: Bool
     let actions: PanelActions
 
+    /// Renaming happens in place: the name becomes a text field.
+    @State private var renaming = false
+    @State private var draftName = ""
+    @FocusState private var nameFocused: Bool
+
     /// Fixed so the accounts list can be sized; pinned rows have the
     /// appearance menus as a third line.
     static func height(_ account: Account) -> CGFloat { account.pinned ? 92 : 64 }
@@ -269,13 +274,29 @@ private struct AccountSettingsRow: View {
                     .font(.caption)
             }
             HStack {
-                Text(account.label)
+                if renaming {
+                    TextField("Name", text: $draftName)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                        .focused($nameFocused)
+                        .onSubmit(saveName)
+                        .onExitCommand { renaming = false }
+                    Button("Save", action: saveName)
+                        .font(.caption)
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Text(account.label)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button("Rename") {
+                        draftName = account.label
+                        renaming = true
+                        nameFocused = true
+                    }
                     .font(.caption)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                Button("Rename", action: rename)
-                    .font(.caption)
+                }
                 if signedIn {
                     Button("Sign out", action: signOut)
                         .font(.caption)
@@ -313,17 +334,10 @@ private struct AccountSettingsRow: View {
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func rename() {
-        let alert = NSAlert()
-        alert.messageText = "Rename account"
-        alert.informativeText = "Choose a name to tell your accounts apart."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(string: account.label)
-        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
-        alert.accessoryView = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let label = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Return or Save keeps the new name; Escape, or an empty name, keeps the old one.
+    private func saveName() {
+        let label = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        renaming = false
         if !label.isEmpty && label != account.label { actions.renameAccount(account.id, label) }
     }
 
