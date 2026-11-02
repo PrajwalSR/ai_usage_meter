@@ -49,6 +49,7 @@ final class UsageStore {
         indexError = LegacyCleanup.removeLegacyURLCache()
         LegacyCleanup.removeLegacyLiveReading()
         LegacyCleanup.migrateLegacyDefaults()
+        WebSession.removeOrphanedStores(keeping: AccountRegistry.shared.accounts)
 
         do {
             index = try UsageIndex()
@@ -95,12 +96,6 @@ final class UsageStore {
         let source: ReadingSource
         let readingURL: URL
 
-        @MainActor static var claude: WebProvider {
-            forAccount(AccountRegistry.shared.accounts.first { $0.provider == .claude }!)
-        }
-        @MainActor static var chatGPT: WebProvider {
-            forAccount(AccountRegistry.shared.accounts.first { $0.provider == .codex }!)
-        }
         @MainActor static func forAccount(_ account: Account) -> WebProvider {
             let legacy = AccountRegistry.isLegacy(account)
             let source: ReadingSource = account.provider == .claude ? .claudeWeb : .chatgptWeb
@@ -125,8 +120,27 @@ final class UsageStore {
             && webErrors[provider.account.id] == nil
     }
 
-    var claudeSignedIn: Bool { isSignedIn(.claude) }
-    var chatGPTSignedIn: Bool { isSignedIn(.chatGPT) }
+    var claudeSignedIn: Bool { signedIn(.claude) }
+    var chatGPTSignedIn: Bool { signedIn(.codex) }
+
+    private func signedIn(_ provider: Provider) -> Bool {
+        accounts.contains { $0.provider == provider && isSignedIn(.forAccount($0)) }
+    }
+
+    /// Accounts with a working website sign-in, for Sign in / Sign out.
+    var signedInAccounts: Set<UUID> {
+        Set(accounts.filter { isSignedIn(.forAccount($0)) }.map(\.id))
+    }
+
+    /// Sign-in for a provider from the usage page: its first account, or a new
+    /// one if all of them were removed.
+    func signIn(toProvider provider: Provider) {
+        if let account = accounts.first(where: { $0.provider == provider }) {
+            signIn(to: .forAccount(account))
+        } else {
+            addAccount(provider)
+        }
+    }
 
     /// Whether the user has asked for this website at all. Until they click
     /// Sign in, the site is never loaded: nothing goes online unasked, and
@@ -202,21 +216,29 @@ final class UsageStore {
     }
 
     func removeAccount(_ id: UUID) {
-        guard let account = accounts.first(where: { $0.id == id }),
-              !AccountRegistry.isLegacy(account) else { return }
-        let provider = WebProvider.forAccount(account)
+        guard let account = accounts.first(where: { $0.id == id }) else { return }
+        forgetWebUsage(account)
         AccountRegistry.shared.remove(id: id)
+        WebSession.removeAccountData(account)
+        onChange?()
+    }
+
+    /// Signs out of the account's website and stops asking it. The account
+    /// stays; Sign in brings it back.
+    func signOutAccount(_ id: UUID) {
+        guard let account = accounts.first(where: { $0.id == id }) else { return }
+        forgetWebUsage(account)
+        WebSession.signOut(account) { [weak self] in Task { @MainActor in self?.refresh() } }
+        onChange?()
+    }
+
+    /// Stops checking the account's website and drops what it last said.
+    private func forgetWebUsage(_ account: Account) {
+        let provider = WebProvider.forAccount(account)
         UserDefaults.standard.removeObject(forKey: Self.enabledKey(provider))
-        webErrors.removeValue(forKey: id)
+        webErrors.removeValue(forKey: account.id)
         try? FileManager.default.removeItem(at: provider.readingURL)
         try? FileManager.default.removeItem(at: provider.destination.rawDump)
-        WebSession.removeAccountData(account) { [weak self] error in
-            if let error {
-                self?.indexError = "Could not clear \(account.label)'s sign-in: \(error.localizedDescription)"
-                self?.onChange?()
-            }
-        }
-        onChange?()
     }
 
     var accountReadings: [UUID: ProviderReading] {
@@ -224,11 +246,14 @@ final class UsageStore {
         for account in accounts {
             let provider = WebProvider.forAccount(account)
             let reading = ClaudeReadings.read(provider.readingURL, source: provider.source)
-            if AccountRegistry.isLegacy(account), reading == nil {
-                if let fallback = account.provider == .claude ? report?.claude : report?.codex {
-                    result[account.id] = fallback
-                    continue
-                }
+            // The original accounts also have the backups (Codex's logs, the
+            // status line). The scan already holds the website reading next to
+            // them, and the freshest wins at display time, so a website that
+            // stopped answering can't pin an old number in place.
+            if AccountRegistry.isLegacy(account),
+               let all = account.provider == .claude ? report?.claude : report?.codex {
+                result[account.id] = all
+                continue
             }
             result[account.id] = ProviderReading(provider: account.provider,
                 readings: reading.map { [$0] } ?? [],
@@ -335,6 +360,9 @@ final class UsageStore {
             .filter(\.pinned).compactMap { account in
                 guard let reading = readings[account.id] else { return nil }
                 var figure = Self.menuBarFigure(reading, now: now, value: account.value)
+                // Something is wrong with this account's website: say so where
+                // the number is, not only inside the panel.
+                if webErrors[account.id] != nil { figure.text += " ⚠︎" }
                 figure.name = account.labelStyle.showsName ? account.label : nil
                 figure.showsLogo = account.labelStyle.showsLogo
                 return (account.provider, figure)

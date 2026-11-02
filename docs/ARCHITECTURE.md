@@ -77,7 +77,10 @@ to `?` without waiting for new data.
    website pages you chose to sign in to. The Keychain is never read.
 7. **Keep accounts separate.** Each added account has its own persistent WebKit
    browser store and usage file. The original two accounts keep their existing
-   browser store and reading files after an upgrade.
+   browser store and reading files after an upgrade, and also use the backups
+   (Codex's logs, the status line); the freshest reading wins. Any account can
+   be signed out or removed; a removed account's browser store is deleted, and
+   any left behind (WebKit refuses while a page uses it) goes at the next launch.
 
 ---
 
