@@ -559,7 +559,7 @@ test("chatgpt.com: the plan name is kept with the reading") {
     let dest = WebUsageSource.Destination(reading: dir.appendingPathComponent("codex-web.json"),
                                           rawDump: dir.appendingPathComponent("raw.json"))
     let json = #"{"usage":{"plan_type":"prolite","rate_limit":{"primary_window":{"used_percent":61,"limit_window_seconds":604800,"reset_at":1800500000}}}}"#
-    check(WebUsageSource.store(rawJSON: json, to: dest, source: .chatgptWeb) == nil, "store should succeed")
+    check(WebUsageSource.store(rawJSON: json, to: dest) == nil, "store should succeed")
     let r = ClaudeReadings.read(dest.reading, source: .chatgptWeb)
     check(r?.planType == "prolite", "plan should survive, got \(String(describing: r?.planType))")
 }
@@ -616,7 +616,7 @@ test("claude.ai: the plan comes from the organization (Max is not shown as Pro)"
     let dest = WebUsageSource.Destination(reading: dir.appendingPathComponent("claude-web.json"),
                                           rawDump: dir.appendingPathComponent("raw.json"))
     let json = #"{"plan":{"tier":"default_claude_max_5x","capabilities":["chat","claude_max"]},"usage":{"five_hour":{"utilization":3,"resets_at":"2030-01-01T00:00:00Z"}}}"#
-    check(WebUsageSource.store(rawJSON: json, to: dest, source: .claudeWeb) == nil, "store should succeed")
+    check(WebUsageSource.store(rawJSON: json, to: dest) == nil, "store should succeed")
     check(ClaudeReadings.read(dest.reading, source: .claudeWeb)?.planType == "claude_max_5x", "plan saved")
 }
 

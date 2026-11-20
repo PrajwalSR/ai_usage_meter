@@ -11,24 +11,16 @@ enum WebUsageSource {
     /// often, and this backend isn't the rate-limited one.
     static let pollInterval: TimeInterval = 60
 
-    /// Where each site's reading and raw reply are written.
+    /// Where an account's reading and (optional) raw reply are written.
     struct Destination {
         var reading: URL
         var rawDump: URL
-
-        static let claude = Destination(
-            reading: ClaudeReadings.webFileURL,
-            rawDump: ClaudeReadings.directory.appendingPathComponent("claude-web-raw.json"))
-        static let chatGPT = Destination(
-            reading: CodexReadings.webFileURL,
-            rawDump: ClaudeReadings.directory.appendingPathComponent("chatgpt-web-raw.json"))
     }
 
     /// Parses the JSON from `WebSession.fetchRawUsage` and writes the reading
     /// file. Returns a description of the problem on failure.
     @discardableResult
-    static func store(rawJSON: String, to destination: Destination,
-                      source: ReadingSource, now: Date = Date()) -> String? {
+    static func store(rawJSON: String, to destination: Destination, now: Date = Date()) -> String? {
         guard let data = rawJSON.data(using: .utf8),
               let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let usage = top["usage"] else { return "no usage in the website's reply" }
@@ -70,7 +62,6 @@ enum WebUsageSource {
         }
         try? FileManager.default.setAttributes([.posixPermissions: 0o600],
                                                ofItemAtPath: destination.reading.path)
-        _ = source          // the reading file's source is decided by which file it is
         return nil
     }
 

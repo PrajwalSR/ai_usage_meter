@@ -300,8 +300,7 @@ final class UsageStore {
                 guard self.isEnabled(provider) else { return }
                 switch result {
                 case .success(let json):
-                    let problem = WebUsageSource.store(rawJSON: json, to: provider.destination,
-                                                       source: provider.source)
+                    let problem = WebUsageSource.store(rawJSON: json, to: provider.destination)
                     self.webErrors[provider.account.id] = problem
                     provider.session.closeLoginWindow()
                     self.refresh()

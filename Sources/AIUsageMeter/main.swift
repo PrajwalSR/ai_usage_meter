@@ -70,10 +70,13 @@ if CommandLine.arguments.contains("--check-claude-web") {
     let app = NSApplication.shared
     MainActor.assumeIsolated {
         app.setActivationPolicy(.accessory)
+        // The first Claude account in Settings, so its own sign-in is used.
+        let account = AccountRegistry.shared.accounts.first { $0.provider == .claude }
+        let session = account.map(WebSession.forAccount) ?? WebSession.claude
         var attempts = 0
         @MainActor func attempt() {
             attempts += 1
-            WebSession.claude.fetchRawUsage { result in
+            session.fetchRawUsage { result in
                 switch result {
                 case .success(let json):
                     print(json)
@@ -82,7 +85,7 @@ if CommandLine.arguments.contains("--check-claude-web") {
                     if case .notSignedIn = failure, attempts == 1 {
                         print("Not signed in — opening the Claude sign-in window.")
                         print("Sign in there; this keeps checking every 5 s.")
-                        WebSession.claude.showLoginWindow()
+                        session.showLoginWindow()
                     } else {
                         print("attempt \(attempts): \(failure.description)")
                     }
