@@ -151,8 +151,9 @@ follow it. **Sign out** erases an account's saved sign-in but keeps it in the
 list; the bin icon removes any account, including the first two, and clears its
 saved sign-in on this Mac.
 
-> **"Continue with Google" will not work here.** Google refuses to sign you in
-> inside an app window like this one. Use the email option.
+> **"Continue with Google"** opens Google's sign-in in a small popup window.
+> If Google ever answers "This browser or app may not be secure", use the
+> email option instead.
 
 The app never sees your password: you type it on the provider's own page. See
 [Is it safe?](#is-it-safe).
@@ -257,7 +258,7 @@ app drops it rather than show a stale 0%.
 
 | What you see | What to do |
 |---|---|
-| "Continue with Google" shows a sign-in error | Google blocks sign-in inside app windows. Use the email option. |
+| "Continue with Google" shows "This browser or app may not be secure" | Google refused this window. Use the email option. |
 | An account shows **Sign in** again, or `⚠︎` in the menu bar | That site's session expired or it stopped answering. Click **Sign in** and sign in once more. |
 | Claude says "Usage unavailable" | Sign in to Claude under ⚙ → Accounts, or set up [the status line](#claude-without-signing-in). |
 | ChatGPT number is old, or shows `?` | Sign in to ChatGPT under ⚙ → Accounts, or use Codex once and it updates. |
@@ -274,7 +275,7 @@ app drops it rather than show a stale 0%.
 |---|---|
 | Live Claude and ChatGPT numbers | ⚙ → **Accounts** → **Sign in** |
 | Start at login | ⚙ → **Open at login** |
-| Show your Claude plan name | `defaults write io.github.prajwalsr.aiusagemeter claudePlanLabel "Pro"` |
+| Claude plan name without signing in | Signed-in accounts show their plan (Pro, Max 5x, Max 20x…) on their own. For the status line only: `defaults write io.github.prajwalsr.aiusagemeter claudePlanLabel "Max"` |
 | Start fresh | Quit the app, then run `./build/AIUsageMeter --scan --rebuild`, or delete `~/Library/Application Support/AIUsageMeter/`. Open it again. |
 
 ---

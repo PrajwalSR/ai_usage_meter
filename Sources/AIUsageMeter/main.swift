@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+// Every file and folder this app creates is owner-only (0600 / 0700): they
+// hold usage numbers and project folder names.
+umask(0o077)
+
 // MARK: - `--scan`: check the numbers without the UI
 
 // `AIUsageMeter --scan` runs one index pass and prints the result.

@@ -69,11 +69,22 @@ What the parser does with it (`WebUsageSource`):
   limit shows up instead of disappearing.
 - Names are matched loosely (`five`/`5h`/`session`, `seven`/`7d`/`week`), since
   these keys are not a published API.
-- The raw reply is saved to `statusline/claude-web-raw.json` for inspection. It
-  holds usage numbers and an organization id — never a cookie.
+- When a limit name is claimed twice (`seven_day` and `seven_day_opus`), the
+  exact key keeps the name and the other keeps its own, so neither overwrites
+  the other.
+- The raw reply is not saved by default. To check a new reply shape, run
+  `defaults write io.github.prajwalsr.aiusagemeter saveRawReplies -bool true`;
+  replies are then saved to `statusline/<provider>-<account>-raw.json` with
+  identity fields (email, user and account ids, names) removed. Never a cookie.
 
-Sign-in notes: Google sign-in does not work inside an embedded window (Google
-blocks it); use email. Events are logged to `statusline/debug.log` — events only,
+The plan comes from the organization the usage is read for: its
+`rate_limit_tier` (e.g. `default_claude_max_5x`) and `capabilities`
+(`claude_max`, `claude_pro`). Only those two fields are passed back.
+
+Sign-in notes: "Continue with Google" opens a popup (`window.open`), which the
+app shows as a child window, and the page reports Safari's user agent so
+Google does not treat it as an embedded web view. If Google still refuses, use
+email. Events are logged to `statusline/debug.log` — events only,
 never cookies or page content.
 
 ---
@@ -110,8 +121,8 @@ What the parser does with it (`WebUsageSource`, same code as claude.ai):
   the rank is never shown as a limit name.
 - `reset_at` (epoch seconds) is preferred; `reset_after_seconds` (seconds from
   now) is the fallback.
-- The raw reply is saved to `statusline/chatgpt-web-raw.json` and the reading to
-  `statusline/codex-web.json`. Neither holds the token or a cookie.
+- The reading is saved to `statusline/codex-web.json`. It holds neither the token
+  nor a cookie. The raw reply is saved only with `saveRawReplies` on (see above).
 
 ### How the Codex sources are combined
 

@@ -29,8 +29,9 @@ final class UsageIndex {
         do {
             try db.begin()
             (seen, read) = try ingest(CodexParser.self, now: now, errors: &errors)
-            try store(ClaudeReadings.load(), for: .claude)
-            try store(CodexReadings.load(), for: .codex)
+            try store(ClaudeReadings.load(), for: .claude,
+                      fileSources: [.claudeStatusLine, .claudeWeb])
+            try store(CodexReadings.load(), for: .codex, fileSources: [.chatgptWeb])
             try db.pruneReadings(before: now.addingTimeInterval(-30 * 86400))
             try db.commit()
         } catch {
@@ -49,9 +50,11 @@ final class UsageIndex {
     /// Saves readings that came from a file rather than a log. Each such source
     /// reports its complete set of limits every time, so its previous rows are
     /// replaced — otherwise a limit that vanished, or one stored under an older
-    /// name, would hang around as a duplicate.
-    private func store(_ readings: [AllowanceReading], for provider: Provider) throws {
-        for source in Set(readings.map(\.source)) {
+    /// name, would hang around as a duplicate. A source whose file is gone
+    /// (signed out) loses its rows too, or its last numbers would stay on screen.
+    private func store(_ readings: [AllowanceReading], for provider: Provider,
+                       fileSources: Set<ReadingSource>) throws {
+        for source in fileSources.union(readings.map(\.source)) {
             try db.deleteReadings(provider: provider.rawValue, source: source)
         }
         for reading in readings {

@@ -35,6 +35,9 @@ import time
 OUT_DIR = os.path.expanduser("~/Library/Application Support/AIUsageMeter/statusline")
 OUT_FILE = os.path.join(OUT_DIR, "claude.json")
 
+# Owner-only files and folders, like the app's own.
+os.umask(0o077)
+
 
 def write_reading(data):
     rate_limits = data.get("rate_limits")

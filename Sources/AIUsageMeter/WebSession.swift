@@ -48,7 +48,27 @@ final class WebSession: NSObject {
     /// Sites whose data belongs to each provider, for clearing one provider's
     /// sign-in out of the default store the original two accounts share.
     private static func siteDomains(_ provider: Provider) -> [String] {
-        provider == .claude ? ["claude.ai", "anthropic.com"] : ["chatgpt.com", "openai.com"]
+        provider == .claude ? ["claude.ai", "claude.com", "anthropic.com"] : ["chatgpt.com", "openai.com"]
+    }
+
+    /// Sites the providers send you to for "Continue with Google / Apple /
+    /// Microsoft". Their pages may open in the sign-in window, and their
+    /// cookies are removed on sign-out.
+    nonisolated static let identityDomains = ["accounts.google.com", "accounts.youtube.com", "google.com",
+                                  "appleid.apple.com", "login.live.com", "login.microsoftonline.com"]
+
+    /// `host` is `domain` or one of its subdomains ("notopenai.com" is not).
+    nonisolated static func isHost(_ host: String, within domain: String) -> Bool {
+        let h = host.lowercased()
+        return h == domain || h.hasSuffix("." + domain)
+    }
+
+    /// Whether a page may open in this session's windows without leaving the
+    /// provider's own sign-in.
+    func isTrusted(_ url: URL?) -> Bool {
+        guard let url, url.scheme == "https", let host = url.host else { return false }
+        let own = Self.siteDomains(home.host == "claude.ai" ? .claude : .codex)
+        return (own + Self.identityDomains).contains { Self.isHost(host, within: $0) }
     }
 
     /// Signs the account out: erases its cookies and site data, and drops the
@@ -65,8 +85,8 @@ final class WebSession: NSObject {
         // this provider's sites are removed.
         let store = WKWebsiteDataStore.default()
         store.fetchDataRecords(ofTypes: types) { records in
-            let domains = siteDomains(account.provider)
-            let mine = records.filter { r in domains.contains { r.displayName.hasSuffix($0) } }
+            let domains = siteDomains(account.provider) + identityDomains
+            let mine = records.filter { r in domains.contains { isHost(r.displayName, within: $0) } }
             store.removeData(ofTypes: types, for: mine, completionHandler: completion)
         }
     }
@@ -130,7 +150,10 @@ final class WebSession: NSObject {
         const org = orgs.find(x => (x.capabilities || []).includes('chat')) || orgs[0];
         const u = await fetch('/api/organizations/' + org.uuid + '/usage', { credentials: 'include' });
         if (!u.ok) return JSON.stringify({ __error: 'usage', status: u.status });
-        return JSON.stringify({ __orgCount: orgs.length, usage: await u.json() });
+        // The plan is named on the organization, not in the usage reply. Only
+        // the plan fields are passed on: no ids, names or billing details.
+        const plan = { tier: org.rate_limit_tier || null, capabilities: org.capabilities || [] };
+        return JSON.stringify({ __orgCount: orgs.length, plan: plan, usage: await u.json() });
         """) }
 
     /// chatgpt.com: usage for the Codex limit on the ChatGPT plan.
@@ -210,6 +233,13 @@ final class WebSession: NSObject {
         try? FileManager.default.createDirectory(at: ClaudeReadings.directory,
                                                  withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
+        // Kept small: about two lines a minute would otherwise grow forever.
+        if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,
+           size > 1_000_000 {
+            let old = url.appendingPathExtension("1")
+            try? FileManager.default.removeItem(at: old)
+            try? FileManager.default.moveItem(at: url, to: old)
+        }
         if let handle = try? FileHandle(forWritingTo: url) {
             defer { try? handle.close() }
             _ = try? handle.seekToEnd()
@@ -242,10 +272,62 @@ final class WebSession: NSObject {
         let config = WKWebViewConfiguration()
         // Persistent store: staying signed in is the point.
         config.websiteDataStore = dataStoreID.map(WKWebsiteDataStore.init(forIdentifier:)) ?? .default()
+        // Google refuses to sign in a page whose user agent says "embedded web
+        // view" (WebKit's default ends without Safari's "Version/… Safari/…").
+        // This is a real WebKit page, so it says what Safari says.
+        config.applicationNameForUserAgent = Self.safariUserAgentSuffix
+        // Popups only from a click, never from a script on its own.
+        config.preferences.javaScriptCanOpenWindowsAutomatically = false
         let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 960, height: 720), configuration: config)
         view.navigationDelegate = self
+        view.uiDelegate = self
         webView = view
         return view
+    }
+
+    /// The end of Safari's user agent, using the installed Safari's version.
+    static var safariUserAgentSuffix: String {
+        let plist = URL(fileURLWithPath: "/Applications/Safari.app/Contents/Info.plist")
+        let version = (NSDictionary(contentsOf: plist)?["CFBundleShortVersionString"] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "18.0"
+        return "Version/\(version) Safari/605.1.15"
+    }
+
+    /// Windows the page opened itself ("Continue with Google" opens one).
+    private var popups: [NSWindow] = []
+
+    fileprivate func openPopup(_ configuration: WKWebViewConfiguration,
+                               features: WKWindowFeatures) -> WKWebView {
+        let width = features.width.map { CGFloat($0.doubleValue) } ?? 520
+        let height = features.height.map { CGFloat($0.doubleValue) } ?? 680
+        // The configuration WebKit hands over must be used as is: it ties the
+        // popup to its opener, which is how the result gets back to the page.
+        let view = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: height),
+                             configuration: configuration)
+        view.navigationDelegate = self
+        view.uiDelegate = self
+        let window = NSWindow(contentRect: view.frame,
+                              styleMask: [.titled, .closable, .resizable],
+                              backing: .buffered, defer: false)
+        window.title = "Sign in to \(siteName)"
+        window.contentView = view
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        if let parent = loginWindow { parent.addChildWindow(window, ordered: .above) }
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        popups.append(window)
+        Self.log("\(siteName): sign-in popup opened")
+        return view
+    }
+
+    fileprivate func closePopup(_ view: WKWebView) {
+        guard let index = popups.firstIndex(where: { $0.contentView === view }) else { return }
+        let window = popups.remove(at: index)
+        window.parent?.removeChildWindow(window)
+        window.orderOut(nil)
+        window.contentView = nil
+        loginWindow?.makeKeyAndOrderFront(nil)
     }
 
     /// Loads claude.ai so `fetch()` below runs on that origin (cookies come with it).
@@ -255,6 +337,9 @@ final class WebSession: NSObject {
             completion(true)
             return
         }
+        // The sign-in window shows this same page. Loading the site now would
+        // pull the user off the sign-in page they are typing in, so wait.
+        guard !isSigningIn else { return completion(false) }
         pendingLoad.append(completion)
         view.load(URLRequest(url: home))
     }
@@ -299,8 +384,15 @@ final class WebSession: NSObject {
             // `callAsyncJavaScript` runs an async function body and waits for it.
             // `evaluateJavaScript` cannot: handed a promise it fails with
             // "returned a result of an unsupported type".
+            // Only on the site itself: `fetch('/api/…')` is relative to whatever
+            // page is showing.
+            guard let view = self.webView, view.url?.host == self.home.host else {
+                return completion(.failure(.pageError("\(self.siteName) isn't loaded")))
+            }
+            // The app's own script world: the page's scripts can't replace
+            // `fetch` or `JSON` there to change what the app reads.
             let js = self.script
-            self.webView?.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
+            view.callAsyncJavaScript(js, arguments: [:], in: nil, in: .defaultClient) { result in
                 switch result {
                 case .failure(let error):
                     Self.log("\(self.siteName): usage call failed: \(error.localizedDescription)")
@@ -342,7 +434,7 @@ final class WebSession: NSObject {
 
         if loginWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
-                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                                  styleMask: [.titled, .closable, .resizable],
                                   backing: .buffered, defer: false)
             window.title = "Sign in to \(siteName)"
             window.contentView = view
@@ -360,26 +452,99 @@ final class WebSession: NSObject {
     }
 
     func closeLoginWindow() {
+        popups.compactMap { $0.contentView as? WKWebView }.forEach(closePopup)
         guard let loginWindow, loginWindow.isVisible else { return }
         loginWindow.orderOut(nil)
-        NSApp.setActivationPolicy(.accessory)       // back to menu bar only
+        Self.settleActivationPolicy()
         Self.log("\(siteName): sign-in window closed")
+    }
+
+    /// Back to menu bar only, unless another account's sign-in window is
+    /// still open: that one would stop taking clicks and typing.
+    static func settleActivationPolicy(closing: NSWindow? = nil) {
+        let anyOpen = sessions.values.contains { session in
+            guard let window = session.loginWindow, window !== closing else { return false }
+            return window.isVisible
+        }
+        if !anyOpen { NSApp.setActivationPolicy(.accessory) }
     }
 }
 
 extension WebSession: NSWindowDelegate {
     /// Closing the sign-in window must not quit a menu bar app.
     nonisolated func windowWillClose(_ notification: Notification) {
-        Task { @MainActor in
-            NSApp.setActivationPolicy(.accessory)
+        MainActor.assumeIsolated {
+            guard let window = notification.object as? NSWindow else { return }
+            // A popup closed with its own close button.
+            if let view = window.contentView as? WKWebView, popups.contains(window) {
+                return closePopup(view)
+            }
+            popups.compactMap { $0.contentView as? WKWebView }.forEach(closePopup)
+            Self.settleActivationPolicy(closing: window)
             Self.log("\(self.siteName): sign-in window dismissed by user")
         }
     }
 }
 
+extension WebSession: WKUIDelegate {
+    /// Without this, a page's `window.open` does nothing at all, so a sign-in
+    /// button that opens a popup (Google's does) seems dead.
+    nonisolated func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                             for navigationAction: WKNavigationAction,
+                             windowFeatures: WKWindowFeatures) -> WKWebView? {
+        MainActor.assumeIsolated {
+            let url = navigationAction.request.url
+            guard isSigningIn, webView === self.webView, isTrusted(url) else {
+                // Anything else (a link in a chat, say) belongs in the browser,
+                // not in a window titled "Sign in".
+                if let url, url.scheme == "https", navigationAction.navigationType == .linkActivated {
+                    NSWorkspace.shared.open(url)
+                }
+                Self.log("\(siteName): popup to \(url?.host ?? "a blank page") refused")
+                return nil
+            }
+            return openPopup(configuration, features: windowFeatures)
+        }
+    }
+
+    /// The popup calls `window.close()` once sign-in is done.
+    nonisolated func webViewDidClose(_ webView: WKWebView) {
+        MainActor.assumeIsolated { closePopup(webView) }
+    }
+}
+
 extension WebSession: WKNavigationDelegate {
+    /// The provider's sites and the sign-in providers load as usual. A link to
+    /// anywhere else opens in the user's browser. Other redirects are allowed
+    /// only while signing in (a company sign-in can live anywhere), and the
+    /// window title then names the site, since there is no address bar.
+    nonisolated func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                             decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
+        MainActor.assumeIsolated {
+            let url = navigationAction.request.url
+            guard navigationAction.targetFrame?.isMainFrame == true,
+                  let scheme = url?.scheme, scheme == "https" || scheme == "http"
+            else { return decisionHandler(.allow) }       // frames, about:blank
+            if isTrusted(url) { return decisionHandler(.allow) }
+            if navigationAction.navigationType == .linkActivated, let url {
+                NSWorkspace.shared.open(url)
+                return decisionHandler(.cancel)
+            }
+            decisionHandler(isSigningIn ? .allow : .cancel)
+        }
+    }
+
+    nonisolated func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        MainActor.assumeIsolated {
+            guard let window = webView.window, let host = webView.url?.host else { return }
+            window.title = "Sign in to \(siteName) — \(host)"
+        }
+    }
+
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
+            // A popup's pages are not the session's own page.
+            guard webView === self.webView else { return }
             let waiting = self.pendingLoad
             self.pendingLoad = []
             waiting.forEach { $0(true) }
@@ -394,6 +559,7 @@ extension WebSession: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
                              withError error: Error) {
         Task { @MainActor in
+            guard webView === self.webView else { return }
             let waiting = self.pendingLoad
             self.pendingLoad = []
             waiting.forEach { $0(false) }
@@ -402,6 +568,7 @@ extension WebSession: WKNavigationDelegate {
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
+            guard webView === self.webView else { return }
             let waiting = self.pendingLoad
             self.pendingLoad = []
             waiting.forEach { $0(false) }

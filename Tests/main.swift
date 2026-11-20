@@ -564,6 +564,62 @@ test("chatgpt.com: the plan name is kept with the reading") {
     check(r?.planType == "prolite", "plan should survive, got \(String(describing: r?.planType))")
 }
 
+test("claude.ai / chatgpt.com: similar limit names never overwrite each other") {
+    let json = """
+    {"usage":{
+      "seven_day":{"utilization":40,"resets_at":"2030-01-08T00:00:00Z"},
+      "seven_day_opus":{"utilization":90,"resets_at":"2030-01-08T00:00:00Z"},
+      "rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":604800,"reset_at":1900000000}},
+      "code_review_rate_limit":{"primary_window":{"used_percent":77,"limit_window_seconds":604800,"reset_at":1900000000}}}}
+    """
+    let usage = (try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])["usage"]!
+    for _ in 0..<5 {                      // same answer every time, whatever the dictionary order
+        let windows = WebUsageSource.parseWindows(usage)
+        let byName = Dictionary(windows, uniquingKeysWith: { a, _ in a })
+        check(windows.count == 4 && byName.count == 4, "all four kept: \(windows.map(\.0))")
+        check(byName["seven_day"]?.usedPercent == 40, "weekly stays the weekly figure")
+        check(byName["seven_day_opus"]?.usedPercent == 90, "Opus kept under its own name")
+        check(byName["primary"]?.usedPercent == 10, "Codex stays the Codex figure")
+        check(byName["code_review_rate_limit.primary_window"]?.usedPercent == 77, "code review kept apart")
+    }
+}
+
+test("Saved raw replies never include the email or account ids") {
+    let reply: [String: Any] = ["usage": ["email": "a@b.c", "user_id": "u", "account_id": "x",
+                                          "rate_limit": ["primary_window": ["used_percent": 5]]]]
+    let text = String(data: try JSONSerialization.data(withJSONObject: WebUsageSource.redacted(reply)),
+                      encoding: .utf8) ?? ""
+    check(!text.contains("a@b.c") && !text.contains("user_id") && !text.contains("account_id"), text)
+    check(text.contains("used_percent"), "usage numbers stay")
+}
+
+test("Sign-in sites: subdomains match, look-alike domains don't") {
+    check(WebSession.isHost("auth.openai.com", within: "openai.com"), "subdomain")
+    check(WebSession.isHost("openai.com", within: "openai.com"), "same")
+    check(!WebSession.isHost("notopenai.com", within: "openai.com"), "look-alike")
+    check(!WebSession.isHost("openai.com.evil.example", within: "openai.com"), "suffix trick")
+}
+
+test("claude.ai: the plan comes from the organization (Max is not shown as Pro)") {
+    func plan(_ tier: String?, _ caps: [String]) -> String? {
+        WebUsageSource.claudePlan(["tier": tier as Any, "capabilities": caps])
+    }
+    check(plan("default_claude_max_20x", ["chat", "claude_max"]) == "claude_max_20x", "Max 20x")
+    check(plan("default_claude_max_5x", ["chat", "claude_max"]) == "claude_max_5x", "Max 5x")
+    check(plan(nil, ["chat", "claude_max"]) == "claude_max", "Max without a tier")
+    check(plan("default_claude_ai", ["chat", "claude_pro"]) == "claude_pro", "Pro")
+    check(plan(nil, ["chat"]) == nil, "unknown plan stays unknown")
+    check(WebUsageSource.claudePlan(nil) == nil, "no plan block")
+
+    let dir = tmp.appendingPathComponent("claude-plan-test", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let dest = WebUsageSource.Destination(reading: dir.appendingPathComponent("claude-web.json"),
+                                          rawDump: dir.appendingPathComponent("raw.json"))
+    let json = #"{"plan":{"tier":"default_claude_max_5x","capabilities":["chat","claude_max"]},"usage":{"five_hour":{"utilization":3,"resets_at":"2030-01-01T00:00:00Z"}}}"#
+    check(WebUsageSource.store(rawJSON: json, to: dest, source: .claudeWeb) == nil, "store should succeed")
+    check(ClaudeReadings.read(dest.reading, source: .claudeWeb)?.planType == "claude_max_5x", "plan saved")
+}
+
 test("Accounts can be reordered, and the order is saved") {
     MainActor.assumeIsolated {
         let url = tmp.appendingPathComponent("accounts-order.json")

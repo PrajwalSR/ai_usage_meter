@@ -29,6 +29,33 @@ enum LegacyCleanup {
             at: ClaudeReadings.directory.appendingPathComponent("claude-live.json"))
     }
 
+    /// Earlier builds saved every website reply, which for chatgpt.com includes
+    /// the account's email and ids. Unless raw replies were asked for, any left
+    /// are deleted.
+    static func removeRawReplies(in dir: URL = ClaudeReadings.directory) {
+        guard !WebUsageSource.saveRawReplies else { return }
+        let fm = FileManager.default
+        for name in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] where name.hasSuffix("-raw.json") {
+            try? fm.removeItem(at: dir.appendingPathComponent(name))
+        }
+    }
+
+    /// Earlier builds created files readable by other users (0644) and the
+    /// readings folder as 0755. Only the outer folder's 0700 protected them;
+    /// now each file is owner-only as well.
+    static func tightenPermissions(app: URL = Database.defaultURL.deletingLastPathComponent()) {
+        let fm = FileManager.default
+        for dir in [app, ClaudeReadings.directory] {
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+            for name in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] {
+                let url = dir.appendingPathComponent(name)
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { continue }
+                try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            }
+        }
+    }
+
     /// Builds before the bundle id became `io.github.prajwalsr.aiusagemeter` kept
     /// their settings under `local.aiusagemeter`. Copied over once, on the first
     /// launch that finds no settings of its own, so nothing is switched off.

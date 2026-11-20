@@ -48,6 +48,8 @@ final class UsageStore {
         // header). Only reports a problem if removal fails.
         indexError = LegacyCleanup.removeLegacyURLCache()
         LegacyCleanup.removeLegacyLiveReading()
+        LegacyCleanup.removeRawReplies()
+        LegacyCleanup.tightenPermissions()
         LegacyCleanup.migrateLegacyDefaults()
         WebSession.removeOrphanedStores(keeping: AccountRegistry.shared.accounts)
 
@@ -292,6 +294,10 @@ final class UsageStore {
                 guard let self else { return }
                 self.webFetchesInFlight.remove(provider.account.id)
                 guard self.accounts.contains(where: { $0.id == provider.account.id }) else { return }
+                // Signed out while this check was running: its answer, good or
+                // bad, belongs to the old sign-in. Saving it would bring the
+                // account back, and an error would show ⚠︎ for nothing.
+                guard self.isEnabled(provider) else { return }
                 switch result {
                 case .success(let json):
                     let problem = WebUsageSource.store(rawJSON: json, to: provider.destination,

@@ -95,10 +95,14 @@ Why it is built this way:
    read the cookie out of Safari's or Chrome's cookie database; this one never
    touches another app's storage.
 2. **Your password never reaches the app.** It is typed on the provider's own page.
-3. **Only numbers come back** — the percentages and reset times. chatgpt.com's
-   usage call needs a bearer token, which the site hands to its own pages at
-   `/api/auth/session`. The script fetches it and uses it *inside the page*, then
-   returns only the usage reply, so the token never reaches the app.
+3. **Only numbers are kept** — the percentages, reset times and plan name.
+   chatgpt.com's usage call needs a bearer token, which the site hands to its
+   own pages at `/api/auth/session`. The script fetches it and uses it *inside
+   the page*, then returns only the usage reply, so the token never reaches the
+   app. The script runs in the app's own isolated script world, so the page's
+   scripts can't change what it reads. The full reply (which for chatgpt.com
+   includes your email) is not saved; see `saveRawReplies` in
+   [docs/DATA-SOURCES.md](docs/DATA-SOURCES.md).
 4. **Sign out (⚙ → Accounts) removes the session**: that account's cookies and
    site data are erased. Removing an account also deletes its browser storage.
 
@@ -106,11 +110,18 @@ Why it is built this way:
 
 - **A signed-in session is sensitive.** Anyone who can run programs as your Mac
   user could use the app's browser storage, exactly as they could use Safari's.
-- **Check the address before typing a password.** The window shows a real web
-  page; it should be the provider's. This app only ever loads `claude.ai` and
-  `chatgpt.com` there.
-- **"Continue with Google" will not work.** Google blocks sign-in inside embedded
-  windows.
+- **Check the address before typing a password.** There is no address bar, so
+  the window title names the site the page is on (for example
+  "Sign in to Claude — accounts.google.com"). It should be the provider's, or
+  Google's, Apple's or Microsoft's sign-in. Links to any other site open in your
+  normal browser instead, popups open only during sign-in and only for those
+  sign-in sites, and outside sign-in the window can't be moved to another site.
+- **"Continue with Google"** opens Google's page in a popup. The window reports
+  Safari's user agent, because Google refuses pages that say they are an
+  embedded window; Google may still refuse, in which case use email.
+- **Files are owner-only.** Everything under
+  `~/Library/Application Support/AIUsageMeter` is created 0600 (folders 0700),
+  and the debug log is trimmed at 1 MB.
 - **These website endpoints are not a published API**, so they may change.
 
 ---

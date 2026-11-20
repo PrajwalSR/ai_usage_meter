@@ -183,7 +183,7 @@ struct SettingsPage: View {
                 }
                 .font(.caption)
                 Text("Sign-in happens on the provider's own page, in a window this app owns. "
-                     + "Use email: Google sign-in doesn't work in app windows.")
+                     + "If Google refuses to sign in here, use email.")
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -416,14 +416,28 @@ struct ProviderCard: View {
 
     /// Badge next to the provider name.
     ///
-    /// Codex logs give an internal id (`prolite` = ChatGPT Pro 5x). Claude's data
-    /// has no plan at all, so its badge is an optional setting, hidden when unset:
+    /// Codex logs give an internal id (`prolite` = ChatGPT Pro 5x). claude.ai
+    /// names the plan on the signed-in organization. Claude's status line has
+    /// no plan, so a fixed label can be set for that case only; the website's
+    /// plan always wins over it:
     ///
-    ///     defaults write io.github.prajwalsr.aiusagemeter claudePlanLabel "Pro"
+    ///     defaults write io.github.prajwalsr.aiusagemeter claudePlanLabel "Max"
     private var planLabel: String? {
         if reading.provider == .claude {
-            let label = UserDefaults.standard.string(forKey: "claudePlanLabel")
-            return (label?.isEmpty ?? true) ? nil : label
+            switch reading.planType {
+            case "claude_max_20x": return "Max 20x"
+            case "claude_max_5x": return "Max 5x"
+            case "claude_max": return "Max"
+            case "claude_pro": return "Pro"
+            case "claude_team": return "Team"
+            case "claude_enterprise": return "Enterprise"
+            default:
+                // A signed-in account whose plan is unknown (Free, or a new
+                // plan) shows no badge rather than another account's label.
+                guard !reading.readings.contains(where: { $0.source == .claudeWeb }) else { return nil }
+                let label = UserDefaults.standard.string(forKey: "claudePlanLabel")
+                return (label?.isEmpty ?? true) ? nil : label
+            }
         }
         guard let raw = reading.planType else { return nil }
         switch raw {
