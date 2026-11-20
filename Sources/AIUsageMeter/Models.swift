@@ -57,6 +57,13 @@ struct AllowanceReading: Sendable, Equatable {
     var source: ReadingSource
     var planType: String?
     var windows: [AllowanceWindow]
+    /// Limit resets the account has and could use on the provider's site.
+    /// Shown as information only: the app never uses one.
+    var resetsAvailable: Int? = nil
+    /// When the soonest of those resets expires, if the site says.
+    var resetsExpireAt: Date? = nil
+    /// Every usable reset's expiry, soonest first (for the hover list).
+    var resetsExpireAll: [Date] = []
 
     /// Windows still valid at `now`. Recomputed on every render, so a reading
     /// that crosses its reset time -- or simply gets too old -- while the panel
@@ -229,6 +236,9 @@ enum Fmt {
         f.dateFormat = "MMM d, h:mm a"
         return f.string(from: date)
     }
+
+    /// "Dec 12, 5:19 PM", for dates days or weeks away.
+    static func day(_ date: Date) -> String { clock(date) }
 
     /// How the source of a reading is described to the user.
     static func sourceLine(_ r: AllowanceReading, now: Date) -> String {

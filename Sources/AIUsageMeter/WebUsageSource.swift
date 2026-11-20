@@ -56,6 +56,17 @@ enum WebUsageSource {
             // claude.ai names it on the organization instead.
             payload["plan_type"] = plan
         }
+        // chatgpt.com: limit resets the account could use on the site. Only
+        // the count is kept, for information; the reply has no expiry date.
+        if let credits = (usage as? [String: Any])?["rate_limit_reset_credits"] as? [String: Any],
+           let count = JSONPath.double(credits, "available_count") {
+            payload["resets_available"] = Int(count)
+        }
+        let expiries = resetExpiries(top["resets"])
+        if let soonest = expiries.first {
+            payload["resets_expire_at"] = soonest.timeIntervalSince1970
+            payload["resets_expire_all"] = expiries.map(\.timeIntervalSince1970)
+        }
         guard let out = try? JSONSerialization.data(withJSONObject: payload),
               (try? out.write(to: destination.reading, options: .atomic)) != nil else {
             return "could not save the reading"
@@ -110,7 +121,7 @@ enum WebUsageSource {
     static func parseWindows(_ any: Any) -> [(String, AllowanceWindow)] {
         var found: [(path: [String], window: AllowanceWindow)] = []
         walk(any, path: [], into: &found)
-        let fromList = limitList(any)
+        let fromList = limitList(any) + additionalLimits(any)
 
         let groups = Dictionary(grouping: found.indices) { normalize(found[$0].path.last ?? "") }
         var result: [(String, AllowanceWindow)] = []
@@ -138,6 +149,22 @@ enum WebUsageSource {
             result.append((name, window))
         }
         return result
+    }
+
+    /// Expiry dates of the resets that can still be used, soonest first:
+    ///
+    ///     [{ "status": "available", "expires_at": "2026-12-12T22:19:24Z" }]
+    static func resetExpiries(_ any: Any?, now: Date = Date()) -> [Date] {
+        guard let list = any as? [[String: Any]] else { return [] }
+        return list
+            .filter { ($0["status"] as? String ?? "available").lowercased() == "available" }
+            .compactMap { JSONPath.date($0["expires_at"]) }
+            .filter { $0 > now }
+            .sorted()
+    }
+
+    static func nextResetExpiry(_ any: Any?, now: Date = Date()) -> Date? {
+        resetExpiries(any, now: now).first
     }
 
     /// Entries of claude.ai's `limits` list:
@@ -174,6 +201,31 @@ enum WebUsageSource {
             guard minutes != nil || resets != nil, !out.contains(where: { $0.0 == name }) else { continue }
             out.append((name, AllowanceWindow(usedPercent: percent, windowMinutes: minutes, resetsAt: resets,
                                               limitId: knownNames.contains(name) ? nil : name)))
+        }
+        return out
+    }
+
+    /// chatgpt.com's `additional_rate_limits`, a list of named limits each with
+    /// its own windows (the shape Codex itself reads; not yet seen filled in):
+    ///
+    ///     [{ "limit_name": "codex_other", "metered_feature": "…",
+    ///        "rate_limit": { "primary_window": { "used_percent": 12, … },
+    ///                        "secondary_window": null } }]
+    static func additionalLimits(_ any: Any) -> [(String, AllowanceWindow)] {
+        guard let list = (any as? [String: Any])?["additional_rate_limits"] as? [[String: Any]] else { return [] }
+        var out: [(String, AllowanceWindow)] = []
+        for entry in list {
+            let name = [entry["limit_name"], entry["metered_feature"]].lazy
+                .compactMap { $0 as? String }.first { !$0.isEmpty } ?? "additional"
+            let windows = parseWindows(entry["rate_limit"] ?? entry)
+                .filter { !$0.0.contains(".") || rankNames.contains(String($0.0.split(separator: ".").last ?? "")) }
+            for (i, (_, w)) in windows.enumerated() {
+                let id = windows.count > 1 && i > 0 ? "\(name) (\(w.windowLabel))" : name
+                guard !out.contains(where: { $0.0 == id }) else { continue }
+                var window = w
+                window.limitId = id
+                out.append((id, window))
+            }
         }
         return out
     }

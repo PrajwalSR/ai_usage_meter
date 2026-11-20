@@ -31,7 +31,9 @@ let sample = UsageReport(
         readings: [AllowanceReading(recordedAt: now.addingTimeInterval(-40), source: .chatgptWeb,
                                   planType: "plus",
                                   windows: [window(86, minutes: 10080, resetsIn: 2 * 86400 + 21 * 3600,
-                                                   limitId: "codex")])],
+                                                   limitId: "codex")],
+                                  resetsAvailable: 1,
+                                  resetsExpireAt: now.addingTimeInterval(22 * 86400))],
         unavailableNote: ""),
     scannedAt: now, scanDuration: 0.02)
 

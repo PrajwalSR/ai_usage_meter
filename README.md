@@ -56,7 +56,14 @@ you pick:
 **All limits** shows every limit the account currently reports, shortest first,
 each in its own color. On plans with a weekly limit for one model (for example
 **Fable** on Max), that limit gets its own row on the card, under 1-Week, and is
-included in All limits. An account with a 5-hour and a weekly limit shows two
+included in All limits.
+
+The Codex card also names any separate limit chatgpt.com reports (such as
+**Code review**), and shows how many **limit resets** your ChatGPT account has
+and when the next one expires ("1 limit reset available · expires Dec 12,
+5:19 PM"), so you can plan when to use it. With several resets, hover over the
+line to see every expiry date. That line is information only: the
+app never uses a reset, and can't. Use one on chatgpt.com when you need it. An account with a 5-hour and a weekly limit shows two
 numbers; a weekly-only account shows one. A limit that has reset drops out on its
 own.
 

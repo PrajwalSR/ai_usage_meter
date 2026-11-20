@@ -36,7 +36,7 @@ flowchart TB
 | Codex logs `~/.codex/sessions` | Reads lines carrying `rate_limits` | Always |
 | Claude Code logs `~/.claude/projects` | **Never opened** | — |
 | `https://claude.ai/api/organizations…` | Sends a request from inside the signed-in page | About once a minute, only after you click **Sign in** for Claude |
-| `https://chatgpt.com/api/auth/session`, `/backend-api/wham/usage` | Sends requests from inside the signed-in page | About once a minute, only after you click **Sign in** for ChatGPT |
+| `https://chatgpt.com/api/auth/session`, `/backend-api/wham/usage`, `/backend-api/wham/rate-limit-reset-credits` | Sends requests from inside the signed-in page | About once a minute, only after you click **Sign in** for ChatGPT |
 | Session cookies for both sites | **Never reads them.** They stay in the app's browser storage, which attaches them automatically | — |
 | chatgpt.com's short-lived access token | Used **inside the page only**, the same way chatgpt.com's own pages use it. Never returned to the app, saved or logged | Each ChatGPT usage check |
 | Keychain (including `Claude Code-credentials`) | **Never opened.** macOS never shows a Keychain prompt for this app | — |

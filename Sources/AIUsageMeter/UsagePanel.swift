@@ -622,7 +622,7 @@ struct ProviderCard: View {
             return "\(w.windowLabel) limit"
         case .codex:
             if let id = w.limitId, !["codex", "primary", "secondary"].contains(id) {
-                return "\(w.windowLabel) Codex limit (\(id))"
+                return "\(w.windowLabel) \(rowLabel(w)) limit"
             }
             return "\(w.windowLabel) Codex limit"
         }
@@ -632,8 +632,40 @@ struct ProviderCard: View {
     /// (a model's weekly limit, "Fable") is called by that name instead, or it
     /// would read as a second "1-Week".
     private func rowLabel(_ w: AllowanceWindow) -> String {
-        if reading.provider == .claude, let id = w.limitId, !id.isEmpty { return id }
-        return w.windowLabel.capitalized
+        guard let id = w.limitId, !id.isEmpty else { return w.windowLabel.capitalized }
+        switch reading.provider {
+        case .claude:
+            return id
+        case .codex:
+            // chatgpt.com's own names: the plan's limits are "codex" or a rank;
+            // anything else is a separate limit and is called by its name.
+            if ["codex", "primary", "secondary"].contains(id) { return w.windowLabel.capitalized }
+            if id.contains("code_review") { return "Code review" }
+            return Self.readable(id)
+        }
+    }
+
+    /// "codex_other" → "Codex other".
+    static func readable(_ id: String) -> String {
+        let words = id.replacingOccurrences(of: "_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+
+    /// Information only: the reset is used on the provider's site, never here.
+    /// Every reset's expiry, then where to use one.
+    private func resetHover(_ r: AllowanceReading) -> String {
+        let site = reading.provider == .codex ? "chatgpt.com" : "claude.ai"
+        let dates = r.resetsExpireAll.filter { $0 > now }.map(Fmt.day)
+        let note = "Use one on \(site) when you need it. This app only shows them."
+        guard !dates.isEmpty else { return note }
+        return "Expires " + dates.joined(separator: " · ") + "\n" + note
+    }
+
+    private func resetLine(_ r: AllowanceReading) -> String? {
+        guard let count = r.resetsAvailable, count > 0 else { return nil }
+        let what = count == 1 ? "1 limit reset available" : "\(count) limit resets available"
+        guard let expiry = r.resetsExpireAt, expiry > now else { return what }
+        return what + (count == 1 ? " · expires " : " · next expires ") + Fmt.day(expiry)
     }
 
     @ViewBuilder
@@ -668,6 +700,11 @@ struct ProviderCard: View {
                             Text(Fmt.until(r, now: now)).font(.caption2).foregroundStyle(.secondary)
                         }
                     }
+                }
+                if let line = resetLine(source) {
+                    Label(line, systemImage: "arrow.counterclockwise")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .help(resetHover(source))
                 }
                 Text(Fmt.sourceLine(source, now: now))
                     .font(.caption2).foregroundStyle(.secondary)

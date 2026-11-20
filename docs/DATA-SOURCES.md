@@ -127,6 +127,15 @@ What the parser does with it (`WebUsageSource`, same code as claude.ai):
   the rank is never shown as a limit name.
 - `reset_at` (epoch seconds) is preferred; `reset_after_seconds` (seconds from
   now) is the fallback.
+- Separate limits are kept under their own names: `code_review_rate_limit`
+  and each entry of `additional_rate_limits` (named by `limit_name`).
+- `rate_limit_reset_credits.available_count` is saved as `resets_available`.
+  The expiry comes from a second read,
+  `GET /backend-api/wham/rate-limit-reset-credits`; only each reset's `status`
+  and `expires_at` are passed back, and the soonest still-available one is
+  saved as `resets_expire_at`. If that read fails, usage is still saved. The
+  app's scripts only send plain GET requests, so they can't use a reset; a
+  test enforces that.
 - The reading is saved to `statusline/codex-web.json`. It holds neither the token
   nor a cookie. The raw reply is saved only with `saveRawReplies` on (see above).
 

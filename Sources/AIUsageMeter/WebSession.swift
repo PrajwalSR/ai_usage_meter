@@ -135,13 +135,11 @@ final class WebSession: NSObject {
         webView = nil
     }
 
-    /// claude.ai: usage for the Claude account.
-    private static func makeClaude(dataStoreID: UUID?) -> WebSession { WebSession(
-        siteName: "Claude",
-        home: URL(string: "https://claude.ai/")!,
-        login: URL(string: "https://claude.ai/login")!,
-        dataStoreID: dataStoreID,
-        script: """
+    /// The scripts run inside the signed-in pages. They only read: every
+    /// request is a plain GET (`fetch` with no `method`), so the app can never
+    /// change anything on an account, such as using a limit reset. A test
+    /// checks this.
+    nonisolated static let claudeScript = """
         const o = await fetch('/api/organizations', { credentials: 'include' });
         if (!o.ok) return JSON.stringify({ __error: 'organizations', status: o.status });
         const orgs = await o.json();
@@ -154,7 +152,44 @@ final class WebSession: NSObject {
         // the plan fields are passed on: no ids, names or billing details.
         const plan = { tier: org.rate_limit_tier || null, capabilities: org.capabilities || [] };
         return JSON.stringify({ __orgCount: orgs.length, plan: plan, usage: await u.json() });
-        """) }
+        """
+
+    nonisolated static let chatGPTScript = """
+        const s = await fetch('/api/auth/session', { credentials: 'include' });
+        if (!s.ok) return JSON.stringify({ __error: 'session', status: s.status });
+        const session = await s.json();
+        const token = session && session.accessToken;
+        if (!token) return JSON.stringify({ __error: 'session', status: 401 });
+        const u = await fetch('/backend-api/wham/usage', {
+          credentials: 'include',
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (!u.ok) return JSON.stringify({ __error: 'usage', status: u.status });
+        const usage = await u.json();
+        // When each limit reset expires (the usage reply only has a count).
+        // Optional: if this request fails, usage still comes back. Only the
+        // status and expiry of each reset are passed on.
+        let resets = null;
+        try {
+          const r = await fetch('/backend-api/wham/rate-limit-reset-credits', {
+            credentials: 'include',
+            headers: { 'Authorization': 'Bearer ' + token }
+          });
+          if (r.ok) {
+            const body = await r.json();
+            resets = (body.credits || []).map(c => ({ status: c.status, expires_at: c.expires_at }));
+          }
+        } catch (_) {}
+        return JSON.stringify({ usage: usage, resets: resets });
+        """
+
+    /// claude.ai: usage for the Claude account.
+    private static func makeClaude(dataStoreID: UUID?) -> WebSession { WebSession(
+        siteName: "Claude",
+        home: URL(string: "https://claude.ai/")!,
+        login: URL(string: "https://claude.ai/login")!,
+        dataStoreID: dataStoreID,
+        script: claudeScript) }
 
     /// chatgpt.com: usage for the Codex limit on the ChatGPT plan.
     ///
@@ -166,19 +201,7 @@ final class WebSession: NSObject {
         home: URL(string: "https://chatgpt.com/codex/settings/usage")!,
         login: URL(string: "https://chatgpt.com/auth/login")!,
         dataStoreID: dataStoreID,
-        script: """
-        const s = await fetch('/api/auth/session', { credentials: 'include' });
-        if (!s.ok) return JSON.stringify({ __error: 'session', status: s.status });
-        const session = await s.json();
-        const token = session && session.accessToken;
-        if (!token) return JSON.stringify({ __error: 'session', status: 401 });
-        const u = await fetch('/backend-api/wham/usage', {
-          credentials: 'include',
-          headers: { 'Authorization': 'Bearer ' + token }
-        });
-        if (!u.ok) return JSON.stringify({ __error: 'usage', status: u.status });
-        return JSON.stringify({ usage: await u.json() });
-        """) }
+        script: chatGPTScript) }
 
     let siteName: String
     private let home: URL

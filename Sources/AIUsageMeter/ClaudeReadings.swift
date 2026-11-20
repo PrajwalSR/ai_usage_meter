@@ -71,6 +71,12 @@ enum ClaudeReadings {
 
         return AllowanceReading(recordedAt: Date(timeIntervalSince1970: stamp),
                                 source: source, planType: obj["plan_type"] as? String,
-                                windows: windows)
+                                windows: windows,
+                                resetsAvailable: JSONPath.double(obj, "resets_available").map { Int($0) },
+                                resetsExpireAt: JSONPath.double(obj, "resets_expire_at")
+                                    .map(Date.init(timeIntervalSince1970:)),
+                                resetsExpireAll: (obj["resets_expire_all"] as? [Any] ?? [])
+                                    .compactMap { ($0 as? NSNumber)?.doubleValue }
+                                    .map(Date.init(timeIntervalSince1970:)))
     }
 }

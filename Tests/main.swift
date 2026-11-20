@@ -640,6 +640,82 @@ test("claude.ai: the limits list fills in only what the reply lacks") {
           "a plan without model limits looks the same, and the block wins: \(plain)")
 }
 
+test("Website scripts only read: no request can change an account") {
+    for script in [WebSession.claudeScript, WebSession.chatGPTScript] {
+        let lower = script.lowercased()
+        check(lower.contains("fetch("), "script makes requests")
+        for banned in ["method", "post", "put", "patch", "delete", "xmlhttprequest", "sendbeacon",
+                       "navigator.", "websocket", "form", ".submit", ".click"] {
+            check(!lower.contains(banned), "script contains '\(banned)'")
+        }
+    }
+}
+
+test("chatgpt.com: limit resets are kept as a count, and extra limits by name") {
+    let json = """
+    {"usage":{"plan_type":"prolite",
+      "rate_limit":{"primary_window":{"used_percent":40,"limit_window_seconds":604800,"reset_at":1900000000},
+                    "secondary_window":null},
+      "code_review_rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800,"reset_at":1900000000}},
+      "additional_rate_limits":[{"limit_name":"codex_other","rate_limit":{
+          "primary_window":{"used_percent":7,"limit_window_seconds":18000,"reset_at":1899990000},
+          "secondary_window":null}}],
+      "rate_limit_reset_credits":{"available_count":1,"applicable_available_count":0}}}
+    """
+    let dir = tmp.appendingPathComponent("codex-extra", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let dest = WebUsageSource.Destination(reading: dir.appendingPathComponent("codex.json"),
+                                          rawDump: dir.appendingPathComponent("raw.json"))
+    check(WebUsageSource.store(rawJSON: json, to: dest) == nil, "store should succeed")
+    guard let r = ClaudeReadings.read(dest.reading, source: .chatgptWeb) else { return check(false, "no reading") }
+    check(r.resetsAvailable == 1, "reset count kept: \(String(describing: r.resetsAvailable))")
+    let ids = Set(r.windows.compactMap(\.limitId))
+    check(ids.contains("codex_other"), "additional limit kept by name: \(ids)")
+    check(ids.contains { $0.contains("code_review") }, "code review kept apart: \(ids)")
+    check(Provider.codex.headline(from: r.windows.filter { $0.limitId == nil || $0.limitId == "primary" })?
+            .usedPercent == 40, "the plan's own limit is still there")
+    check(ProviderCard.readable("codex_other") == "Codex other", "names read as words")
+}
+
+test("chatgpt.com: the soonest usable reset's expiry is kept") {
+    let now = Date(timeIntervalSince1970: 1_890_000_000)          // Nov 2029
+    let list: [[String: Any]] = [
+        ["status": "available", "expires_at": "2030-03-20T10:00:00Z"],
+        ["status": "available", "expires_at": "2030-03-10T10:00:00Z"],
+        ["status": "redeemed", "expires_at": "2030-03-01T10:00:00Z"],     // used: ignored
+        ["status": "available", "expires_at": "2029-01-01T00:00:00Z"],    // past: ignored
+    ]
+    let soonest = WebUsageSource.nextResetExpiry(list, now: now)
+    check(soonest == ISO8601DateFormatter().date(from: "2030-03-10T10:00:00Z"), "soonest usable: \(String(describing: soonest))")
+    check(WebUsageSource.nextResetExpiry(nil, now: now) == nil, "no list, no date")
+
+    let json = """
+    {"usage":{"rate_limit":{"primary_window":{"used_percent":1,"limit_window_seconds":604800,"reset_at":1900500000}},
+              "rate_limit_reset_credits":{"available_count":1}},
+     "resets":[{"status":"available","expires_at":"2099-12-12T22:19:24.476343Z"}]}
+    """
+    let dir = tmp.appendingPathComponent("reset-expiry", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let dest = WebUsageSource.Destination(reading: dir.appendingPathComponent("codex.json"),
+                                          rawDump: dir.appendingPathComponent("raw.json"))
+    check(WebUsageSource.store(rawJSON: json, to: dest) == nil, "store should succeed")
+    let r = ClaudeReadings.read(dest.reading, source: .chatgptWeb)
+    check(r?.resetsAvailable == 1 && r?.resetsExpireAt != nil, "count and expiry saved")
+
+    let many = """
+    {"usage":{"rate_limit":{"primary_window":{"used_percent":1,"limit_window_seconds":604800,"reset_at":1900500000}},
+              "rate_limit_reset_credits":{"available_count":3}},
+     "resets":[{"status":"available","expires_at":"2099-01-03T14:00:00Z"},
+               {"status":"available","expires_at":"2099-12-12T22:19:24Z"},
+               {"status":"redeemed","expires_at":"2098-01-01T00:00:00Z"},
+               {"status":"available","expires_at":"2099-06-20T09:00:00Z"}]}
+    """
+    check(WebUsageSource.store(rawJSON: many, to: dest) == nil, "store should succeed")
+    let all = ClaudeReadings.read(dest.reading, source: .chatgptWeb)?.resetsExpireAll ?? []
+    check(all.count == 3 && all == all.sorted(), "every usable reset, soonest first: \(all)")
+    check(all.first == ISO8601DateFormatter().date(from: "2099-01-03T14:00:00Z"), "soonest first")
+}
+
 test("Saved raw replies never include the email or account ids") {
     let reply: [String: Any] = ["usage": ["email": "a@b.c", "user_id": "u", "account_id": "x",
                                           "rate_limit": ["primary_window": ["used_percent": 5]]]]
