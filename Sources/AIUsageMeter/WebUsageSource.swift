@@ -110,6 +110,7 @@ enum WebUsageSource {
     static func parseWindows(_ any: Any) -> [(String, AllowanceWindow)] {
         var found: [(path: [String], window: AllowanceWindow)] = []
         walk(any, path: [], into: &found)
+        let fromList = limitList(any)
 
         let groups = Dictionary(grouping: found.indices) { normalize(found[$0].path.last ?? "") }
         var result: [(String, AllowanceWindow)] = []
@@ -128,7 +129,53 @@ enum WebUsageSource {
                 }
             }
         }
+        // claude.ai's `limits` list carries limits that have no block of their
+        // own, such as a weekly limit for one model ("Fable"). They are kept
+        // under that name; the list's session and weekly entries only fill in
+        // when the reply has no `five_hour` / `seven_day` block.
+        let taken = Set(result.map(\.0))
+        for (name, window) in fromList where !taken.contains(name) {
+            result.append((name, window))
+        }
         return result
+    }
+
+    /// Entries of claude.ai's `limits` list:
+    ///
+    ///     { "kind": "weekly_scoped", "group": "weekly", "percent": 1,
+    ///       "resets_at": "2026-11-23T10:59:59Z",
+    ///       "scope": { "model": { "display_name": "Fable" } } }
+    ///
+    /// `session` → `five_hour`, `weekly_all` → `seven_day`; anything else is
+    /// named by its scope's display name, or by its kind.
+    static func limitList(_ any: Any) -> [(String, AllowanceWindow)] {
+        guard let list = (any as? [String: Any])?["limits"] as? [[String: Any]] else { return [] }
+        var out: [(String, AllowanceWindow)] = []
+        for entry in list {
+            guard let percent = JSONPath.double(entry, "percent") ?? percentage(in: entry) else { continue }
+            let kind = (entry["kind"] as? String ?? "").lowercased()
+            let group = (entry["group"] as? String ?? "").lowercased()
+            let scope = entry["scope"] as? [String: Any]
+            let scopeName = ["model", "surface"].lazy
+                .compactMap { (scope?[$0] as? [String: Any])?["display_name"] as? String }
+                .first { !$0.isEmpty }
+            let name: String
+            switch kind {
+            case "session": name = "five_hour"
+            case "weekly_all": name = "seven_day"
+            default: name = scopeName ?? (kind.isEmpty ? "limit" : kind)
+            }
+            let minutes: Int? = switch group {
+            case "session": 300
+            case "weekly": 10080
+            default: name == "five_hour" ? 300 : name == "seven_day" ? 10080 : nil
+            }
+            let resets = resetDate(in: entry)
+            guard minutes != nil || resets != nil, !out.contains(where: { $0.0 == name }) else { continue }
+            out.append((name, AllowanceWindow(usedPercent: percent, windowMinutes: minutes, resetsAt: resets,
+                                              limitId: knownNames.contains(name) ? nil : name)))
+        }
+        return out
     }
 
     /// `five_hour`, `seven_day`, or a rank window directly under the main

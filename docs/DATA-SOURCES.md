@@ -69,6 +69,12 @@ What the parser does with it (`WebUsageSource`):
   limit shows up instead of disappearing.
 - Names are matched loosely (`five`/`5h`/`session`, `seven`/`7d`/`week`), since
   these keys are not a published API.
+- Newer replies also list every limit under `limits`, including ones with no
+  block of their own, such as a model's weekly limit
+  (`"kind": "weekly_scoped"`, `"scope": {"model": {"display_name": "Fable"}}`).
+  Those are kept under their display name and shown as their own row. The
+  list's `session` and `weekly_all` entries are used only when the reply has no
+  `five_hour` / `seven_day` block.
 - When a limit name is claimed twice (`seven_day` and `seven_day_opus`), the
   exact key keeps the name and the other keeps its own, so neither overwrites
   the other.

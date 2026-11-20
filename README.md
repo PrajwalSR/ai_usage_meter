@@ -44,15 +44,19 @@ only the time left, the time is colored instead.)
 
 ### Change how each account looks
 
-Every pinned account has two menus under ⚙ → **Accounts**:
+Under ⚙ → **Accounts**, each account's row shows exactly what it puts in the
+menu bar right now. Click the row to open its options; the preview changes as
+you pick:
 
-| Menu | Choices |
+| Option | Choices |
 |---|---|
-| Label | **Logo and name** (default) · Logo only · Name only · Numbers only |
+| Show | Logo · Name · **Both** (default) · None (numbers only) |
 | Value | **% and time left** (default) `38% in 2h 21m` · % only `38%` · Time left only `2h 21m` · All limits `38% · 63%` |
 
 **All limits** shows every limit the account currently reports, shortest first,
-each in its own color. An account with a 5-hour and a weekly limit shows two
+each in its own color. On plans with a weekly limit for one model (for example
+**Fable** on Max), that limit gets its own row on the card, under 1-Week, and is
+included in All limits. An account with a 5-hour and a weekly limit shows two
 numbers; a weekly-only account shows one. A limit that has reset drops out on its
 own.
 
@@ -134,22 +138,26 @@ You don't need a paid Apple Developer account.
 <img src="docs/images/settings-dark.png" width="340" alt="Settings page with Accounts">
 
 1. Click the menu bar item, then the **⚙** gear.
-2. Under **Accounts**, click **Sign in** next to Claude or ChatGPT.
+2. Under **Accounts**, click **+ Add account** and choose Claude or Codex. (To
+   sign an existing account back in, click its row, then **Sign in**.)
 3. That site's real sign-in page opens in a window this app owns. Sign in with
    **your email**.
 4. As soon as you're signed in and the app gets its first number, the window
    closes by itself and the numbers update every minute.
 
-For another account, click **Add Claude account** or **Add Codex account** under
-**Accounts**, then sign in to that account. Click **Rename** to edit its name
-right there in the list, so you can tell your accounts apart. Tick **Pin** on any accounts you want to see in the menu bar;
-you can pin as many as you like, though macOS may hide menu bar items if there
-isn't enough screen space. Unpinned accounts remain in the dropdown and keep
-updating. Drag an account up or down to change the order; the others slide
-aside and a line shows where it will land. The usage cards and menu bar items
-follow it. **Sign out** erases an account's saved sign-in but keeps it in the
-list; the bin icon removes any account, including the first two, and clears its
-saved sign-in on this Mac.
+Add as many accounts as you like the same way. Each account is one row: its
+logo, name, plan, and a preview of what it shows in the menu bar.
+
+- **Pin** (the pin icon) puts an account in the menu bar. Pin as many as you
+  like, though macOS may hide menu bar items if there isn't enough space.
+  Unpinned accounts say "Not in menu bar", stay in the dropdown and keep
+  updating.
+- **Click a row** to open it: choose what it shows in the menu bar, **Rename**
+  it in place, **Sign out** (erases its saved sign-in, keeps it in the list) or
+  **Remove** it (also clears its saved sign-in on this Mac). One row is open at
+  a time.
+- **Drag** a row up or down to change the order; the usage cards and menu bar
+  items follow it.
 
 > **"Continue with Google"** opens Google's sign-in in a small popup window.
 > If Google ever answers "This browser or app may not be secure", use the
@@ -158,7 +166,7 @@ saved sign-in on this Mac.
 The app never sees your password: you type it on the provider's own page. See
 [Is it safe?](#is-it-safe).
 
-To start the app when your Mac starts, tick **Open at login** on the same page.
+To start the app when your Mac starts, turn on **Open at login** on the same page.
 
 ---
 
@@ -264,7 +272,7 @@ app drops it rather than show a stale 0%.
 | ChatGPT number is old, or shows `?` | Sign in to ChatGPT under ⚙ → Accounts, or use Codex once and it updates. |
 | Claude's 5-hour row is missing | The last reading is older than 5 hours, so it can't be trusted. It returns at the next successful check. |
 | Numbers are a bit different from another app | Compare how old each number is. Numbers taken minutes apart differ. |
-| Doesn't open at login after moving the app | Untick and tick **Open at login** again. |
+| Doesn't open at login after moving the app | Turn **Open at login** off and on again. |
 | "AI Usage Meter is already running" | Only one copy can run. Look for it in the menu bar, or quit it first. |
 
 ---

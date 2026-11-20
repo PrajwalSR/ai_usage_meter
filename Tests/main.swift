@@ -584,6 +584,62 @@ test("claude.ai / chatgpt.com: similar limit names never overwrite each other") 
     }
 }
 
+test("claude.ai: a model's own weekly limit (Fable) is read from the limits list") {
+    // Shape of a real Max reply; numbers made up.
+    let json = """
+    {"plan":{"tier":"default_claude_max_5x","capabilities":["chat","claude_max"]},
+     "usage":{
+      "five_hour":{"utilization":7,"resets_at":"2030-01-01T05:00:00Z"},
+      "seven_day":{"utilization":2,"resets_at":"2030-01-06T11:00:00Z"},
+      "seven_day_opus":null,
+      "limits":[
+        {"group":"session","kind":"session","percent":7,"resets_at":"2030-01-01T05:00:00Z","scope":null},
+        {"group":"weekly","kind":"weekly_all","percent":2,"resets_at":"2030-01-06T11:00:00Z","scope":null},
+        {"group":"weekly","kind":"weekly_scoped","percent":1,"resets_at":"2030-01-06T11:00:00Z",
+         "scope":{"model":{"display_name":"Fable","id":null},"surface":null}}],
+      "seven_day_breakdown":{"rows":[{"display_name":"Claude Code","key":"claude_code","percent":88}]}}}
+    """
+    let usage = (try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])["usage"]!
+    let byName = Dictionary(WebUsageSource.parseWindows(usage), uniquingKeysWith: { a, _ in a })
+    check(byName.count == 3, "5-hour, weekly and Fable only: \(byName.keys.sorted())")
+    check(byName["five_hour"]?.usedPercent == 7, "5-hour unchanged")
+    check(byName["seven_day"]?.usedPercent == 2, "weekly stays the all-models figure")
+    check(byName["Fable"]?.usedPercent == 1 && byName["Fable"]?.windowMinutes == 10080, "Fable is a weekly limit")
+    check(byName["Fable"]?.limitId == "Fable", "Fable keeps its name for the card")
+
+    // Saved and read back like the app does.
+    let dir = tmp.appendingPathComponent("fable-test", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let dest = WebUsageSource.Destination(reading: dir.appendingPathComponent("claude.json"),
+                                          rawDump: dir.appendingPathComponent("raw.json"))
+    check(WebUsageSource.store(rawJSON: json, to: dest) == nil, "store should succeed")
+    let reading = ClaudeReadings.read(dest.reading, source: .claudeWeb)
+    check(reading?.windows.count == 3, "three windows saved")
+    check(reading.flatMap { Provider.claude.headline(from: $0.windows) }?.usedPercent == 7,
+          "the big number stays the 5-hour limit")
+}
+
+test("claude.ai: the limits list fills in only what the reply lacks") {
+    let onlyList = """
+    {"limits":[{"group":"session","kind":"session","percent":12,"resets_at":"2030-01-01T05:00:00Z"},
+               {"group":"weekly","kind":"weekly_all","percent":30,"resets_at":"2030-01-06T11:00:00Z"}]}
+    """
+    let byName = Dictionary(WebUsageSource.parseWindows(
+        try! JSONSerialization.jsonObject(with: Data(onlyList.utf8))), uniquingKeysWith: { a, _ in a })
+    check(byName["five_hour"]?.usedPercent == 12 && byName["seven_day"]?.usedPercent == 30,
+          "session and weekly come from the list when there are no blocks: \(byName.keys.sorted())")
+
+    let noModelLimit = """
+    {"five_hour":{"utilization":5,"resets_at":"2030-01-01T05:00:00Z"},
+     "seven_day":{"utilization":9,"resets_at":"2030-01-06T11:00:00Z"},
+     "limits":[{"group":"session","kind":"session","percent":99,"resets_at":"2030-01-01T05:00:00Z"}]}
+    """
+    let plain = Dictionary(WebUsageSource.parseWindows(
+        try! JSONSerialization.jsonObject(with: Data(noModelLimit.utf8))), uniquingKeysWith: { a, _ in a })
+    check(plain.count == 2 && plain["five_hour"]?.usedPercent == 5,
+          "a plan without model limits looks the same, and the block wins: \(plain)")
+}
+
 test("Saved raw replies never include the email or account ids") {
     let reply: [String: Any] = ["usage": ["email": "a@b.c", "user_id": "u", "account_id": "x",
                                           "rate_limit": ["primary_window": ["used_percent": 5]]]]

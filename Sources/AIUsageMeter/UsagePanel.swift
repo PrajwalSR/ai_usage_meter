@@ -20,6 +20,8 @@ struct PanelModel {
     var launchesAtLogin: Bool
     var errors: [String]
     var now: Date
+    /// The account whose options start open (used for screenshots).
+    var initiallyExpanded: UUID? = nil
 }
 
 struct PanelActions {
@@ -51,16 +53,23 @@ struct UsagePanel: View {
             header
             Divider()
             ScrollView {
-                if model.showingSettings {
-                    SettingsPage(model: model, actions: actions)
-                } else {
-                    usagePage
+                Group {
+                    if model.showingSettings {
+                        SettingsPage(model: model, actions: actions)
+                    } else {
+                        usagePage
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .frame(maxHeight: 620)
         }
         .padding(14)
         .frame(width: 340)
+        // While a row opens, the window is already its new height and the
+        // content is still growing. Centred, everything would drift; pinned to
+        // the top, only the space below the opening row moves.
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var header: some View {
@@ -145,60 +154,108 @@ struct SettingsPage: View {
     let model: PanelModel
     let actions: PanelActions
 
+    /// The one account whose options are open, if any.
+    @State private var expanded: UUID?
+    /// The account being renamed, and its new name so far.
+    @State private var renaming: UUID?
+    @State private var draftName = ""
+    @FocusState private var nameFocused: Bool
+
+    /// The account being dragged to a new place, if any.
+    @State private var dragging: UUID?
+
+    init(model: PanelModel, actions: PanelActions) {
+        self.model = model
+        self.actions = actions
+        _expanded = State(initialValue: model.initiallyExpanded)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Accounts").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack {
+                    Text("Accounts").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Menu {
+                        Button("Claude account") { actions.addAccount(.claude) }
+                        Button("Codex account") { actions.addAccount(.codex) }
+                    } label: {
+                        Label("Add account", systemImage: "plus").font(.caption)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Sign in to another Claude or Codex account")
+                }
                 if model.accounts.isEmpty {
                     accountRow(name: "Claude", detail: "claude.ai · every minute",
                                signedIn: model.claudeSignedIn, signIn: actions.signInToClaude)
                     accountRow(name: "ChatGPT", detail: "chatgpt.com · every minute",
                                signedIn: model.chatGPTSignedIn, signIn: actions.signInToChatGPT)
                 } else {
-                    // A native list, so dragging a card slides the others aside
-                    // and shows where it will land. The usage cards and menu bar
-                    // items follow this order. A List has no height of its own
-                    // inside the popover, so each row has a fixed height and the
-                    // list is sized to fit them all.
-                    List {
+                    // Plain SwiftUI rows, not a native List: inserting a row
+                    // into a List flashed the gap black while it slid the rows
+                    // below. The usage cards and menu bar items follow this order.
+                    VStack(spacing: 0) {
                         ForEach(model.accounts, id: \.id) { account in
-                            AccountSettingsRow(account: account, signedIn: model.signedInAccounts.contains(account.id),
-                                               actions: actions)
-                                .frame(height: AccountSettingsRow.height(account), alignment: .top)
-                                // The list's own ~16 pt side inset stays: row cells
-                                // clip anything wider, cutting off the card edges.
-                                .listRowInsets(EdgeInsets(top: 3, leading: 0, bottom: 3, trailing: 0))
-                                .listRowSeparator(.hidden)
+                            VStack(spacing: 0) {
+                                AccountSummaryRow(
+                                    account: account,
+                                    reading: model.accountReadings[account.id],
+                                    hasProblem: model.accountErrors[account.id] != nil,
+                                    isExpanded: expanded == account.id,
+                                    isRenaming: renaming == account.id,
+                                    draftName: $draftName,
+                                    nameFocused: $nameFocused,
+                                    now: model.now,
+                                    toggle: { toggle(account.id) },
+                                    saveName: { saveName(account) },
+                                    cancelRename: { renaming = nil },
+                                    setPinned: { actions.setPinned(account.id, $0) })
+                                    .frame(height: AccountSummaryRow.height)
+                                    // Dragged by the account's own row, so the
+                                    // controls in an open row still work.
+                                    .onDrag {
+                                        expanded = nil
+                                        dragging = account.id
+                                        return NSItemProvider(object: account.id.uuidString as NSString)
+                                    }
+                                if expanded == account.id {
+                                    AccountDetailsRow(
+                                        account: account,
+                                        signedIn: model.signedInAccounts.contains(account.id),
+                                        isRenaming: renaming == account.id,
+                                        startRename: { startRename(account) },
+                                        saveName: { saveName(account) },
+                                        cancelRename: { renaming = nil },
+                                        actions: actions)
+                                        .frame(height: AccountDetailsRow.height)
+                                        .transition(.opacity)
+                                }
+                            }
+                            .onDrop(of: [.text], delegate: AccountDropDelegate(
+                                target: account.id, accounts: model.accounts,
+                                dragging: $dragging, move: actions.moveAccounts))
                         }
-                        .onMove { actions.moveAccounts($0, $1) }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .scrollDisabled(true)
-                    .frame(height: model.accounts.map { AccountSettingsRow.height($0) + 6 }.reduce(0, +))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                HStack {
-                    Button("Add Claude account") { actions.addAccount(.claude) }
-                    Button("Add Codex account") { actions.addAccount(.codex) }
-                }
-                .font(.caption)
-                Text("Sign-in happens on the provider's own page, in a window this app owns. "
-                     + "If Google refuses to sign in here, use email.")
+                Text("You sign in on the provider's own page. If Google refuses, use email.")
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Options").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                if model.launchAtLoginAvailable {
-                    Toggle(isOn: Binding(get: { model.launchesAtLogin },
-                                         set: { actions.toggleLaunchAtLogin($0) })) {
-                        Text("Open at login").font(.caption)
-                    }
-                    .toggleStyle(.checkbox)
+            if model.launchAtLoginAvailable {
+                Divider()
+                Toggle(isOn: Binding(get: { model.launchesAtLogin },
+                                     set: { actions.toggleLaunchAtLogin($0) })) {
+                    Text("Open at login").font(.callout)
                 }
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
 
             if !model.errors.isEmpty {
@@ -217,12 +274,29 @@ struct SettingsPage: View {
             HStack(spacing: 5) {
                 Circle().fill(model.isWatching ? Color.green : Color.orange)
                     .frame(width: 6, height: 6)
-                Text(model.isWatching ? "Codex log backup active" : "Codex log backup unavailable")
+                Text(model.isWatching ? "Codex log backup on" : "Codex log backup unavailable")
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Button("Quit", action: actions.quit).buttonStyle(.borderless).font(.caption)
             }
         }
+    }
+
+    private func toggle(_ id: UUID) {
+        withAnimation(.easeInOut(duration: 0.22)) { expanded = expanded == id ? nil : id }
+    }
+
+    private func startRename(_ account: Account) {
+        draftName = account.label
+        renaming = account.id
+        nameFocused = true
+    }
+
+    /// Return or Save keeps the new name; Escape, or an empty name, keeps the old one.
+    private func saveName(_ account: Account) {
+        let label = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        renaming = nil
+        if !label.isEmpty && label != account.label { actions.renameAccount(account.id, label) }
     }
 
     private func accountRow(name: String, detail: String,
@@ -245,100 +319,189 @@ struct SettingsPage: View {
     }
 }
 
-private struct AccountSettingsRow: View {
+/// Reorders as you drag: hovering over another account moves the dragged one
+/// into its place, and the rows slide to make room.
+private struct AccountDropDelegate: DropDelegate {
+    let target: UUID
+    let accounts: [Account]
+    @Binding var dragging: UUID?
+    let move: (IndexSet, Int) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged = dragging, dragged != target,
+              let from = accounts.firstIndex(where: { $0.id == dragged }),
+              let to = accounts.firstIndex(where: { $0.id == target }) else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            move(IndexSet(integer: from), to > from ? to + 1 : to)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        dragging = nil
+        return true
+    }
+}
+
+/// One account's row: logo, name, plan, and what it shows in the menu bar.
+/// Its height never changes; opening it adds `AccountDetailsRow` below.
+private struct AccountSummaryRow: View {
     let account: Account
-    let signedIn: Bool
-    let actions: PanelActions
+    let reading: ProviderReading?
+    let hasProblem: Bool
+    let isExpanded: Bool
+    let isRenaming: Bool
+    @Binding var draftName: String
+    var nameFocused: FocusState<Bool>.Binding
+    let now: Date
+    let toggle: () -> Void
+    let saveName: () -> Void
+    let cancelRename: () -> Void
+    let setPinned: (Bool) -> Void
 
-    /// Renaming happens in place: the name becomes a text field.
-    @State private var renaming = false
-    @State private var draftName = ""
-    @FocusState private var nameFocused: Bool
-
-    /// Fixed so the accounts list can be sized; pinned rows have the
-    /// appearance menus as a third line.
-    static func height(_ account: Account) -> CGFloat { account.pinned ? 92 : 64 }
+    static let height: CGFloat = 48
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Image(systemName: "line.3.horizontal")
-                    .foregroundStyle(.secondary)
-                    .help("Drag to reorder")
-                Text(account.provider == .claude ? "Claude" : "Codex")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                Toggle("Pin", isOn: Binding(get: { account.pinned },
-                                             set: { actions.setPinned(account.id, $0) }))
-                    .toggleStyle(.checkbox)
-                    .font(.caption)
-            }
-            HStack {
-                if renaming {
-                    TextField("Name", text: $draftName)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                        .focused($nameFocused)
-                        .onSubmit(saveName)
-                        .onExitCommand { renaming = false }
-                    Button("Save", action: saveName)
-                        .font(.caption)
-                        .keyboardShortcut(.defaultAction)
-                } else {
-                    Text(account.label)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Button("Rename") {
-                        draftName = account.label
-                        renaming = true
-                        nameFocused = true
+        HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .font(.caption).foregroundStyle(.tertiary)
+                .help("Drag to reorder")
+            Image(nsImage: account.provider == .claude ? ProviderIcons.claude : ProviderIcons.codex)
+                .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    if isRenaming {
+                        TextField("Name", text: $draftName)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.callout)
+                            .focused(nameFocused)
+                            .onSubmit(saveName)
+                            .onExitCommand(perform: cancelRename)
+                    } else {
+                        Text(account.label).font(.callout.weight(.medium))
+                            .lineLimit(1).truncationMode(.middle)
+                            .layoutPriority(1)
+                        if let plan = reading.flatMap(ProviderCard.planLabel) {
+                            Text(plan).font(.caption2)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(.quaternary, in: Capsule())
+                        }
                     }
-                    .font(.caption)
                 }
-                if signedIn {
-                    Button("Sign out", action: signOut)
-                        .font(.caption)
-                } else {
-                    Button("Sign in") { actions.signInAccount(account.id) }
-                        .font(.caption)
-                }
-                Button(role: .destructive, action: remove) {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .help("Remove \(account.label)")
+                preview
             }
-            // How it looks in the menu bar; only matters while pinned.
-            if account.pinned {
-                HStack(spacing: 6) {
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+            Button { setPinned(!account.pinned) } label: {
+                Image(systemName: account.pinned ? "pin.fill" : "pin")
+                    .foregroundStyle(account.pinned ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help(account.pinned ? "Shown in the menu bar. Click to hide." : "Hidden. Click to show in the menu bar.")
+            Image(systemName: "chevron.down")
+                .font(.caption).foregroundStyle(.secondary)
+                .rotationEffect(.degrees(isExpanded ? 180 : 0))
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { if !isRenaming { toggle() } }
+        .overlay(alignment: .bottom) {
+            if !isExpanded { Rectangle().fill(Color.secondary.opacity(0.15)).frame(height: 0.5) }
+        }
+    }
+
+    /// Exactly what this account shows in the menu bar right now, drawn the
+    /// same way, or a note when it isn't shown there.
+    @ViewBuilder private var preview: some View {
+        if !account.pinned {
+            Text("Not in menu bar").font(.caption).foregroundStyle(.secondary)
+        } else if let image = menuBarPreview {
+            Image(nsImage: image)
+                .opacity(0.75)
+                .help("How it looks in the menu bar")
+        } else {
+            Text("Waiting for a reading").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Drawn by the same code as the menu bar item, so it can't drift from it.
+    private var menuBarPreview: NSImage? {
+        guard let reading else { return nil }
+        var figure = hasProblem ? ProviderIcons.MenuBarFigure(text: "⚠︎")
+            : UsageStore.menuBarFigure(reading, now: now, value: account.value)
+        figure.name = account.labelStyle.showsName ? account.label : nil
+        figure.showsLogo = account.labelStyle.showsLogo
+        return ProviderIcons.menuBarImage([(account.provider, figure)])
+    }
+}
+
+/// The opened part under an account: its menu bar options and actions.
+private struct AccountDetailsRow: View {
+    let account: Account
+    let signedIn: Bool
+    let isRenaming: Bool
+    let startRename: () -> Void
+    let saveName: () -> Void
+    let cancelRename: () -> Void
+    let actions: PanelActions
+
+    static let height: CGFloat = 92
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+                GridRow {
+                    Text("Show").font(.caption).foregroundStyle(.secondary)
                     Picker("", selection: Binding(get: { account.labelStyle },
                                                   set: { actions.setMenuLabel(account.id, $0) })) {
-                        ForEach(MenuBarLabel.allCases, id: \.self) { Text($0.title).tag($0) }
+                        Text("Logo").tag(MenuBarLabel.logo)
+                        Text("Name").tag(MenuBarLabel.name)
+                        Text("Both").tag(MenuBarLabel.logoAndName)
+                        Text("None").tag(MenuBarLabel.none)
                     }
+                    .pickerStyle(.segmented)
                     .help("What identifies this account in the menu bar")
+                }
+                GridRow {
+                    Text("Value").font(.caption).foregroundStyle(.secondary)
                     Picker("", selection: Binding(get: { account.value },
                                                   set: { actions.setMenuValue(account.id, $0) })) {
                         ForEach(MenuBarValue.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
+                    .pickerStyle(.menu)
                     .help("What this account shows in the menu bar")
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .controlSize(.small)
-                .font(.caption)
             }
-        }
-        .padding(8)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-    }
+            .labelsHidden()
+            .controlSize(.small)
+            .disabled(!account.pinned)
 
-    /// Return or Save keeps the new name; Escape, or an empty name, keeps the old one.
-    private func saveName() {
-        let label = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
-        renaming = false
-        if !label.isEmpty && label != account.label { actions.renameAccount(account.id, label) }
+            HStack(spacing: 14) {
+                if isRenaming {
+                    Button("Save", action: saveName).keyboardShortcut(.defaultAction)
+                    Button("Cancel", action: cancelRename)
+                } else {
+                    Button("Rename", action: startRename)
+                }
+                if signedIn {
+                    Button("Sign out", action: signOut)
+                } else {
+                    Button("Sign in") { actions.signInAccount(account.id) }
+                }
+                Spacer()
+                Button("Remove", role: .destructive, action: remove)
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+        }
+        .padding(.leading, 40).padding(.trailing, 10).padding(.top, 2)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.secondary.opacity(0.15)).frame(height: 0.5)
+        }
     }
 
     private func signOut() {
@@ -422,7 +585,9 @@ struct ProviderCard: View {
     /// plan always wins over it:
     ///
     ///     defaults write io.github.prajwalsr.aiusagemeter claudePlanLabel "Max"
-    private var planLabel: String? {
+    private var planLabel: String? { Self.planLabel(for: reading) }
+
+    static func planLabel(for reading: ProviderReading) -> String? {
         if reading.provider == .claude {
             switch reading.planType {
             case "claude_max_20x": return "Max 20x"
@@ -463,6 +628,14 @@ struct ProviderCard: View {
         }
     }
 
+    /// "1-Week" for the plan's own windows. A Claude limit with its own name
+    /// (a model's weekly limit, "Fable") is called by that name instead, or it
+    /// would read as a second "1-Week".
+    private func rowLabel(_ w: AllowanceWindow) -> String {
+        if reading.provider == .claude, let id = w.limitId, !id.isEmpty { return id }
+        return w.windowLabel.capitalized
+    }
+
     @ViewBuilder
     private var allowanceSection: some View {
         switch reading.display(now: now) {
@@ -484,8 +657,10 @@ struct ProviderCard: View {
                 // 7-day window under its 5-hour one.
                 ForEach(Array(others.enumerated()), id: \.offset) { _, w in
                     HStack(spacing: 6) {
-                        Text(w.windowLabel.capitalized)
+                        Text(rowLabel(w))
                             .font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .frame(minWidth: 44, alignment: .leading)
                         bar(w.usedPercent)
                         Text("\(Int(w.usedPercent.rounded()))%")
                             .font(.caption.monospacedDigit())
