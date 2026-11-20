@@ -103,7 +103,9 @@ What's covered today:
 - Signed in: the cards say "From claude.ai · …" / "From chatgpt.com · …" and update about every minute
 - Fresh install, not signed in: ⚙ → Accounts offers **Sign in**, no warnings appear, and `lsof` shows no connections
 - Percentages change colour at 25%, 50% and 80%, in the menu bar and the panel
-- macOS never shows a Keychain prompt
+- macOS never asks for any Keychain item except WebKit's own "AI Usage Meter
+  WebCrypto Master Key", which it may ask about again after a rebuild (the
+  ad-hoc signature changes every build)
 - `statusline/debug.log` records sign-in and request events, never cookies
 - `--scan` numbers match Claude's `/usage` screen and your Codex usage
 
@@ -119,7 +121,7 @@ What's covered today:
 | Change the menu bar logos | `ProviderIcons.swift`, `assets/` |
 | Decide which source wins | `ReadingSelection.choose` in `Models.swift` |
 | Fix a sign-in window or site script | `WebSession.swift` |
-| Fix website field mapping | `WebUsageSource.swift` (check `statusline/claude-web-raw.json` / `chatgpt-web-raw.json`) |
+| Fix website field mapping | `WebUsageSource.swift` (turn on `saveRawReplies`, see [docs/DATA-SOURCES.md](docs/DATA-SOURCES.md), then check `statusline/*-raw.json`) |
 | Change the cache schema | `Database.swift`: bump `schemaVersion` (the file name follows) |
 | Fix Codex numbers | `CodexParser.swift` |
 | Change which window is the big number | `Provider.headline` in `Models.swift` |

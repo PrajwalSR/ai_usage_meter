@@ -20,7 +20,7 @@ let sample = UsageReport(
     claude: ProviderReading(
         provider: .claude,
         readings: [AllowanceReading(recordedAt: now.addingTimeInterval(-90), source: .claudeWeb,
-                                  planType: nil,
+                                  planType: "claude_max_5x",
                                   windows: [window(38, minutes: 300, resetsIn: 2 * 3600 + 21 * 60),
                                             window(63, minutes: 10080, resetsIn: 28 * 3600)])],
         unavailableNote: ""),

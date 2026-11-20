@@ -43,3 +43,4 @@ claude-web.json
 codex-web.json
 *-raw.json
 debug.log
+debug.log.*
