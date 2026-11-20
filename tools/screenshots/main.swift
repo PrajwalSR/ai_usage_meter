@@ -71,7 +71,10 @@ MainActor.assumeIsolated {
                                   setPinned: { _, _ in }, renameAccount: { _, _ in },
                                   removeAccount: { _ in }, signInAccount: { _ in },
                                   toggleLaunchAtLogin: { _ in }, quit: {}))
+        // macOS's default blue accent, whatever this Mac's own accent is, so
+        // the images show what most people will see.
         let host = NSHostingView(rootView: panel
+            .tint(Color(nsColor: .systemBlue))
             .background(appearance == .darkAqua ? Color(white: 0.16) : Color(white: 0.97)))
         host.appearance = NSAppearance(named: appearance)
         host.frame = NSRect(origin: .zero, size: host.fittingSize)

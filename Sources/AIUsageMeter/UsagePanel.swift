@@ -395,7 +395,7 @@ private struct AccountSummaryRow: View {
             .layoutPriority(1)
             Button { setPinned(!account.pinned) } label: {
                 Image(systemName: account.pinned ? "pin.fill" : "pin")
-                    .foregroundStyle(account.pinned ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(account.pinned ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             }
             .buttonStyle(.borderless)
             .help(account.pinned ? "Shown in the menu bar. Click to hide." : "Hidden. Click to show in the menu bar.")
