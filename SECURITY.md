@@ -176,7 +176,7 @@ login. Logins also expire on their own.
 |---|---|
 | Website endpoints are unofficial | claude.ai or chatgpt.com could change them. Numbers would stop updating; nothing becomes unsafe. |
 | A signed-in session sits in the app's storage | Same exposure as being signed in to those sites in a browser on this Mac. Click **Sign out** on the account to remove it. |
-| Not signed by Apple | Fine when you build it yourself. Downloads you share should be signed and notarized. |
+| Not signed by Apple | The release zip is only ad-hoc signed, so macOS can't confirm who made it and asks you to click **Open Anyway** once. Check the zip's SHA-256 against the one in the release notes, or build it yourself from the source. A Developer ID signature and notarization would remove the warning. |
 | Malware on your Mac | Anything running as your user can already read these files and your browser sessions. This app neither adds nor removes that risk. |
 
 ---

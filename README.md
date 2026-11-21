@@ -8,6 +8,10 @@ and **ChatGPT (Codex)** limits you have used, and when they reset.
 > **Early build.** It works on my Mac and I use it every day, but it hasn't been
 > tested widely yet. Apple silicon, macOS 14 or newer.
 
+**[Download the latest release](https://github.com/PrajwalSR/ai_usage_meter/releases/latest)**
+(a zip with the ready-to-run app; see [Install](#install)), or
+[build it yourself](#or-build-it-yourself).
+
 ---
 
 ## Why I built this
@@ -121,12 +125,31 @@ access.
 
 ## Install
 
-You need:
-- A Mac with Apple silicon (M1, M2, M3…) on **macOS 14 or newer**
-- Apple's free developer tools. If you don't have them, run:
-  ```bash
-  xcode-select --install
-  ```
+You need a Mac with Apple silicon (M1, M2, M3…) on **macOS 14 or newer**.
+
+### Download it (easiest)
+
+1. Download **AI-Usage-Meter-*version*.zip** from the
+   [latest release](https://github.com/PrajwalSR/ai_usage_meter/releases/latest).
+2. Double-click the zip, then drag **AI Usage Meter** to your Applications folder.
+3. Open it. The first time, macOS says it can't check the app for malicious
+   software, because the app isn't signed with a paid Apple Developer ID. Click
+   **Done**.
+4. Open **System Settings → Privacy & Security**, scroll down, and click
+   **Open Anyway** next to AI Usage Meter. Confirm with your password.
+
+You only do this once; after that it opens normally. To update, quit the app,
+download the new zip and replace the old copy. Your accounts and sign-ins carry
+over.
+
+### Or build it yourself
+
+If you'd rather not run a downloaded app, build it from the source. You need
+Apple's free developer tools. If you don't have them, run:
+
+```bash
+xcode-select --install
+```
 
 Then:
 
@@ -267,6 +290,7 @@ app drops it rather than show a stale 0%.
 
 | What you see | What to do |
 |---|---|
+| macOS says it "can't check AI Usage Meter for malicious software" | Expected for the downloaded app, which isn't signed with a paid Apple Developer ID. Click **Done**, then **System Settings → Privacy & Security → Open Anyway**. You only do this once. |
 | "Continue with Google" shows "This browser or app may not be secure" | Google refused this window. Use the email option. |
 | An account shows **Sign in** again, or `⚠︎` in the menu bar | That site's session expired or it stopped answering. Click **Sign in** and sign in once more. |
 | Claude says "Usage unavailable" | Sign in to Claude under ⚙ → Accounts, or set up [the status line](#claude-without-signing-in). |
