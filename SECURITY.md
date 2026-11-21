@@ -197,3 +197,7 @@ login. Logins also expire on their own.
       `grep -rn '\.codex/\|"\.codex"\|\.claude/projects' Sources/` finds nothing
 - [ ] `./scripts/run-tests.sh` passes
 - [ ] `git status` shows no databases, `.jsonl` logs, `auth.json` or `build/` files
+- [ ] Zip the app without macOS metadata (no `._` files, extended attributes or ACLs):
+      `ditto -c -k --norsrc --noextattr --noacl --keepParent "build/AI Usage Meter.app" AI-Usage-Meter-VERSION.zip`
+- [ ] `zipinfo -1 AI-Usage-Meter-VERSION.zip | grep '\._'` finds nothing
+- [ ] The zip's SHA-256 (`shasum -a 256 AI-Usage-Meter-VERSION.zip`) is in the release notes
