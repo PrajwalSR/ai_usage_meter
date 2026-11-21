@@ -1,6 +1,6 @@
 import Foundation
 
-/// Claude's allowance readings, which come from outside the session logs.
+/// Claude's allowance readings. Claude Code's session logs are never read.
 ///
 /// Two sources, each in its own file so neither can overwrite the other:
 ///

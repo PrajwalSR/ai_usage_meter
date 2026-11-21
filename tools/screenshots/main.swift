@@ -59,7 +59,7 @@ MainActor.assumeIsolated {
                                          ("panel-dark.png", NSAppearance.Name.darkAqua, false),
                                          ("settings-dark.png", NSAppearance.Name.darkAqua, true)] {
         let panel = UsagePanel(
-            model: PanelModel(report: sample, isScanning: false, isWatching: true,
+            model: PanelModel(report: sample, isScanning: false,
                               showingSettings: settings, claudeSignedIn: true, chatGPTSignedIn: true,
                               accounts: sampleAccounts, accountReadings: sampleReadings,
                               signedInAccounts: Set(sampleAccounts.map(\.id)),

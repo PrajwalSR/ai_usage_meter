@@ -4,20 +4,20 @@ import SQLite3
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 /// Minimal SQLite wrapper. Every write reports failure by throwing, so an index
-/// pass can roll back instead of leaving token totals and file offsets out of step.
+/// pass can roll back instead of saving half of its readings.
 ///
 /// Not thread-safe: `UsageIndex` owns one connection and uses it from one task.
 final class Database {
     private var db: OpaquePointer?
 
     /// Bump when the schema changes. The cache is disposable, so an older schema
-    /// is dropped and rebuilt from the logs.
+    /// is dropped and rebuilt from the reading files.
     ///
-    /// The version is also part of the file name (`cache-v3.sqlite`). An older
+    /// The version is also part of the file name (`cache-v5.sqlite`). An older
     /// build still running therefore keeps writing its own file and can't corrupt
     /// this one. That happened once: a v1 build running alongside a v2 build
     /// double-counted tokens.
-    static let schemaVersion: Int32 = 4
+    static let schemaVersion: Int32 = 5
 
     struct DBError: Error, CustomStringConvertible {
         let message: String
@@ -30,8 +30,7 @@ final class Database {
         let dir = FileManager.default
             .homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/AIUsageMeter", isDirectory: true)
-        // Owner-only: the cache records log file paths, which include project
-        // folder names.
+        // Owner-only: the cache holds usage numbers.
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
@@ -79,19 +78,9 @@ final class Database {
                 }
                 try exec("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS buckets; "
                          + "DROP TABLE IF EXISTS snapshots; DROP TABLE IF EXISTS readings;")
-                // `buckets` held token counts. The app no longer counts tokens.
+                // `buckets` held token counts and `files` how far each Codex log
+                // had been read. The app no longer counts tokens or reads logs.
             }
-            // How far each log has been read. inode + offset detect replacement
-            // and truncation.
-            try exec("""
-            CREATE TABLE IF NOT EXISTS files (
-                path TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                inode INTEGER NOT NULL,
-                offset INTEGER NOT NULL,
-                mtime REAL NOT NULL
-            );
-            """)
             // Allowance readings exactly as reported. One row per limit
             // (`limit_key` = the window's limit id, or "" when it has none), so a
             // newer reading for one limit never replaces another limit.
@@ -169,57 +158,6 @@ final class Database {
     /// Safe to call when no transaction is open.
     func rollback() { try? exec("ROLLBACK;") }
 
-    /// Nested checkpoint inside the pass transaction, so one file's partial
-    /// writes can be undone without abandoning the whole pass.
-    func savepoint(_ name: String) throws { try exec("SAVEPOINT \(name);") }
-    func release(_ name: String) throws { try exec("RELEASE \(name);") }
-    func rollback(to name: String) {
-        try? exec("ROLLBACK TO \(name);")
-        try? exec("RELEASE \(name);")
-    }
-
-    // MARK: - Files
-
-    struct FileState: Equatable { var inode: UInt64; var offset: UInt64 }
-
-    func fileStates(provider: String) throws -> [String: FileState] {
-        let stmt = try prepare("SELECT path, inode, offset FROM files WHERE provider=?;")
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, provider, -1, SQLITE_TRANSIENT)
-        var out: [String: FileState] = [:]
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let path = String(cString: sqlite3_column_text(stmt, 0))
-            out[path] = FileState(inode: UInt64(sqlite3_column_int64(stmt, 1)),
-                                  offset: UInt64(sqlite3_column_int64(stmt, 2)))
-        }
-        return out
-    }
-
-    func setFileState(provider: String, path: String, inode: UInt64, offset: UInt64,
-                      mtime: Date) throws {
-        let stmt = try prepare("""
-        INSERT INTO files(path,provider,inode,offset,mtime) VALUES(?,?,?,?,?)
-        ON CONFLICT(path) DO UPDATE SET provider=excluded.provider, inode=excluded.inode,
-          offset=excluded.offset, mtime=excluded.mtime;
-        """)
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 2, provider, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int64(stmt, 3, Int64(bitPattern: inode))
-        sqlite3_bind_int64(stmt, 4, Int64(offset))
-        sqlite3_bind_double(stmt, 5, mtime.timeIntervalSince1970)
-        try run(stmt)
-    }
-
-    /// Forgets how far a provider's logs were read, so they are read again.
-    /// Used when a log was replaced or truncated.
-    func resetFileOffsets(provider: String) throws {
-        let stmt = try prepare("DELETE FROM files WHERE provider=?;")
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, provider, -1, SQLITE_TRANSIENT)
-        try run(stmt)
-    }
-
     // MARK: - Allowance readings
 
     /// Stores a reading split by limit: one row per distinct `limitId`.
@@ -245,11 +183,10 @@ final class Database {
 
     /// Removes every stored reading from one source.
     ///
-    /// Used for sources that report their whole set of limits at once (the
-    /// websites, the status line): the newest reply is the truth,
-    /// so an entry that has disappeared — or was stored under an older name —
-    /// must not linger as if it were a separate limit. Log-derived readings are
-    /// never cleared this way: each log line is its own point-in-time record.
+    /// Every source reports its whole set of limits at once (the websites, the
+    /// status line): the newest reply is the truth, so an entry that has
+    /// disappeared — or was stored under an older name — must not linger as if
+    /// it were a separate limit.
     func deleteReadings(provider: String, source: ReadingSource) throws {
         let stmt = try prepare("DELETE FROM readings WHERE provider=? AND source=?;")
         defer { sqlite3_finalize(stmt) }
@@ -285,8 +222,7 @@ final class Database {
         return out
     }
 
-    /// Keeps the readings table from growing without bound: Codex writes a
-    /// reading on most turns.
+    /// Drops readings too old to matter.
     func pruneReadings(before: Date) throws {
         let stmt = try prepare("DELETE FROM readings WHERE recorded_at < ?;")
         defer { sqlite3_finalize(stmt) }

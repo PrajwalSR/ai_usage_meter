@@ -42,54 +42,6 @@ func writeFile(_ name: String, _ data: Data) -> URL {
 
 let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-// MARK: - LineReader
-
-test("LineReader: oversized line is skipped and the offset still covers it") {
-    // Codex review: a ~69 MB read returned an offset of ~1 MB. Reproduced here
-    // with a small limit.
-    var content = Data("first\n".utf8)
-    content.append(Data(repeating: UInt8(ascii: "x"), count: 500))  // oversized
-    content.append(Data("\nlast\n".utf8))
-    let url = writeFile("oversized.jsonl", content)
-
-    var lines: [String] = []
-    let offset = try LineReader.forEachLine(url: url, chunkSize: 16, maxLineBytes: 64) {
-        lines.append(String(decoding: $0, as: UTF8.self))
-    }
-    check(lines == ["first", "last"], "expected only normal lines, got \(lines.map { $0.prefix(10) })")
-    check(offset == UInt64(content.count), "offset \(offset) should equal file size \(content.count)")
-
-    // A second pass from that offset must read nothing (no recounting).
-    var again = 0
-    let offset2 = try LineReader.forEachLine(url: url, from: offset, chunkSize: 16, maxLineBytes: 64) { _ in
-        again += 1
-    }
-    check(again == 0 && offset2 == offset, "resuming re-read \(again) lines")
-}
-
-test("LineReader: an unfinished oversized line at end of file is not consumed") {
-    var content = Data("ok\n".utf8)
-    content.append(Data(repeating: UInt8(ascii: "y"), count: 300))  // no newline yet
-    let url = writeFile("oversized-partial.jsonl", content)
-    let offset = try LineReader.forEachLine(url: url, chunkSize: 16, maxLineBytes: 64) { _ in }
-    check(offset == 3, "offset should stop after the last complete line, got \(offset)")
-}
-
-test("LineReader: a half-written last line is not delivered or consumed") {
-    let url = writeFile("partial.jsonl", Data("{\"a\":1}\n{\"b\":".utf8))
-    var lines: [String] = []
-    let offset = try LineReader.forEachLine(url: url) { lines.append(String(decoding: $0, as: UTF8.self)) }
-    check(lines == ["{\"a\":1}"], "got \(lines)")
-    check(offset == 8, "offset \(offset) should be 8")
-}
-
-test("LineReader: resuming from an offset delivers only new lines") {
-    let url = writeFile("resume.jsonl", Data("one\ntwo\nthree\n".utf8))
-    var lines: [String] = []
-    _ = try LineReader.forEachLine(url: url, from: 4) { lines.append(String(decoding: $0, as: UTF8.self)) }
-    check(lines == ["two", "three"], "got \(lines)")
-}
-
 // MARK: - Expiry at display time
 
 func window(_ pct: Double, minutes: Int, resetsIn: TimeInterval, limitId: String? = nil) -> AllowanceWindow {
@@ -111,7 +63,7 @@ test("Expiry: a reading whose windows have all reset shows as unknown, never 0%"
 
 test("Expiry: the same reading is valid before reset and unknown after, without a rescan") {
     let r = providerReading(.codex, AllowanceReading(
-        recordedAt: now, source: .codexLog, planType: nil,
+        recordedAt: now, source: .chatgptWeb, planType: nil,
         windows: [window(55, minutes: 10080, resetsIn: 120)]))
     if case .available = r.display(now: now) {} else { check(false, "expected .available before reset") }
     if case .expired = r.display(now: now.addingTimeInterval(121)) {} else {
@@ -162,43 +114,21 @@ test("Menu bar colour: plain below 25%, then yellow, orange, red") {
 
 // MARK: - Codex windows and limit ids
 
-test("Codex: every window and its limit_id are kept; headline is the one closest to its limit") {
-    let rl: [String: Any] = [
-        "limit_id": "codex",
-        "plan_type": "prolite",
-        "primary": ["used_percent": 54.0, "window_minutes": 10080, "resets_at": 1_800_100_000],
-        "secondary": ["used_percent": 71.0, "window_minutes": 300, "resets_at": 1_800_010_000],
-    ]
-    guard let reading = CodexParser.reading(from: rl, recordedAt: now) else {
-        return check(false, "no reading parsed")
+test("Codex: the headline is the window closest to its limit") {
+    let windows = [window(54, minutes: 10080, resetsIn: 100_000, limitId: "codex"),
+                   window(71, minutes: 300, resetsIn: 10_000, limitId: "codex")]
+    check(Provider.codex.headline(from: windows)?.usedPercent == 71, "headline should be 71%")
+}
+
+test("Codex: usage comes only from chatgpt.com; the app never reads ~/.codex") {
+    check(Provider.codex.sourcePriority == [.chatgptWeb], "chatgpt.com should be the only source")
+    let dir = URL(fileURLWithPath: "Sources/AIUsageMeter")
+    let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+    check(!files.isEmpty, "app sources not found from \(FileManager.default.currentDirectoryPath)")
+    for name in files where name.hasSuffix(".swift") {
+        let text = (try? String(contentsOf: dir.appendingPathComponent(name), encoding: .utf8)) ?? ""
+        check(!text.contains("\".codex/") && !text.contains("\".codex\""), "\(name) refers to the ~/.codex folder")
     }
-    check(reading.windows.count == 2, "expected 2 windows, got \(reading.windows.count)")
-    check(reading.windows.allSatisfy { $0.limitId == "codex" }, "limit_id lost")
-    check(reading.planType == "prolite", "plan lost")
-    check(Provider.codex.headline(from: reading.windows)?.usedPercent == 71, "headline should be 71%")
-}
-
-test("Codex: window length comes from window_minutes, not from primary/secondary") {
-    let rl: [String: Any] = [
-        "primary": ["used_percent": 54.0, "window_minutes": 10080, "resets_at": 1_800_100_000],
-        "secondary": NSNull(),
-    ]
-    let reading = CodexParser.reading(from: rl, recordedAt: now)
-    check(reading?.windows.count == 1, "null secondary should be ignored")
-    check(reading?.windows.first?.windowLabel == "1-week", "primary should be labeled 1-week")
-}
-
-test("Codex: a log file yields its limit reading, and nothing else is read") {
-    let lines = [
-        #"{"timestamp":"2027-01-15T08:00:00.000Z","type":"token_usage_record","payload":{"usage":{"input_tokens":1000,"output_tokens":50}}}"#,
-        #"{"timestamp":"2027-01-15T08:00:01.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":12.5,"window_minutes":10080,"resets_at":1800000000}}}}"#,
-        #"{"timestamp":"2027-01-15T08:00:02.000Z","type":"response_item","payload":{"text":"unrelated"}}"#,
-    ].joined(separator: "\n") + "\n"
-    let url = writeFile("codex.jsonl", Data(lines.utf8))
-    var readings: [AllowanceReading] = []
-    _ = try CodexParser.parse(url: url, from: 0) { readings.append($0) }
-    check(readings.count == 1, "expected exactly one reading, got \(readings.count)")
-    check(readings.first?.windows.first?.usedPercent == 12.5, "reading not parsed")
 }
 
 // MARK: - Claude sources
@@ -243,31 +173,15 @@ test("Claude: files from older builds (recorded_at) still load") {
 
 // MARK: - Database
 
-test("Database: a rolled-back pass leaves no readings and no offsets behind") {
+test("Database: a rolled-back pass leaves no readings behind") {
     let db = try Database(url: tmp.appendingPathComponent("rollback.sqlite"))
     try db.begin()
     try db.addReading(provider: "codex", AllowanceReading(
-        recordedAt: now, source: .codexLog, planType: nil,
+        recordedAt: now, source: .chatgptWeb, planType: nil,
         windows: [window(10, minutes: 10080, resetsIn: 600, limitId: "codex")]))
-    try db.setFileState(provider: "codex", path: "/fake.jsonl", inode: 1, offset: 99, mtime: now)
     db.rollback()
     let readings = try db.latestReadings(provider: "codex")
-    let offsets = try db.fileStates(provider: "codex")
     check(readings.isEmpty, "reading survived rollback")
-    check(offsets.isEmpty, "offset survived rollback")
-}
-
-test("Database: a file's savepoint rollback undoes only that file") {
-    let db = try Database(url: tmp.appendingPathComponent("savepoint.sqlite"))
-    try db.begin()
-    try db.setFileState(provider: "codex", path: "/first.jsonl", inode: 1, offset: 10, mtime: now)
-    try db.savepoint("file")
-    try db.setFileState(provider: "codex", path: "/second.jsonl", inode: 2, offset: 20, mtime: now)
-    db.rollback(to: "file")
-    try db.commit()
-    let kept = try db.fileStates(provider: "codex")
-    check(kept.count == 1 && kept["/first.jsonl"] != nil,
-          "partial file writes should be undone, earlier writes kept: \(kept.keys.sorted())")
 }
 
 test("Database: write errors are thrown, not ignored") {
@@ -281,9 +195,9 @@ test("Database: readings keep every window and the newest per source and limit")
     let db = try Database(url: tmp.appendingPathComponent("readings.sqlite"))
     // Same limit id as `new`, so `new` replaces it. (Different ids are kept
     // separately; see the multi-limit test below.)
-    let old = AllowanceReading(recordedAt: now.addingTimeInterval(-100), source: .codexLog, planType: "plus",
+    let old = AllowanceReading(recordedAt: now.addingTimeInterval(-100), source: .chatgptWeb, planType: "plus",
                                windows: [window(10, minutes: 10080, resetsIn: 1000, limitId: "codex")])
-    let new = AllowanceReading(recordedAt: now, source: .codexLog, planType: "prolite",
+    let new = AllowanceReading(recordedAt: now, source: .chatgptWeb, planType: "prolite",
                                windows: [window(20, minutes: 10080, resetsIn: 1000, limitId: "codex"),
                                          window(30, minutes: 300, resetsIn: 100, limitId: "codex")])
     try db.addReading(provider: "codex", old)
@@ -298,9 +212,9 @@ test("Database: readings keep every window and the newest per source and limit")
 
 test("Codex: a newer reading for one limit doesn't hide another still-valid limit") {
     let db = try Database(url: tmp.appendingPathComponent("multi-limit.sqlite"))
-    let a = AllowanceReading(recordedAt: now.addingTimeInterval(-10), source: .codexLog, planType: nil,
+    let a = AllowanceReading(recordedAt: now.addingTimeInterval(-10), source: .chatgptWeb, planType: nil,
                              windows: [window(80, minutes: 10080, resetsIn: 3600, limitId: "codex")])
-    let b = AllowanceReading(recordedAt: now, source: .codexLog, planType: nil,
+    let b = AllowanceReading(recordedAt: now, source: .chatgptWeb, planType: nil,
                              windows: [window(5, minutes: 10080, resetsIn: 3600, limitId: "other-limit")])
     try db.addReading(provider: "codex", a)
     try db.addReading(provider: "codex", b)
@@ -340,17 +254,6 @@ test("Claude: an expired claude.ai reading doesn't hide a valid status-line read
     } else { check(false, "expected .available after claude.ai expiry") }
 }
 
-test("LineReader: an oversized line that ends inside one chunk is skipped") {
-    let content = Data((String(repeating: "x", count: 65) + "\nok\n").utf8)
-    let url = writeFile("single-chunk.jsonl", content)
-    var lines: [String] = []
-    let offset = try LineReader.forEachLine(url: url, chunkSize: 1024, maxLineBytes: 64) {
-        lines.append(String(decoding: $0, as: UTF8.self))
-    }
-    check(lines == ["ok"], "oversized complete line was delivered")
-    check(offset == UInt64(content.count), "offset should cover the whole file")
-}
-
 test("Database: schema upgrade is all-or-nothing and the version is in the file name") {
     check(Database.defaultURL.lastPathComponent == "cache-v\(Database.schemaVersion).sqlite",
           "cache file name should include the schema version")
@@ -358,11 +261,24 @@ test("Database: schema upgrade is all-or-nothing and the version is in the file 
     _ = try Database(url: url)                  // creates current schema
     let reopened = try Database(url: url)       // reopening must not drop data
     try reopened.begin()
-    try reopened.setFileState(provider: "codex", path: "/x.jsonl", inode: 1, offset: 5, mtime: now)
+    try reopened.addReading(provider: "codex", AllowanceReading(
+        recordedAt: now, source: .chatgptWeb, planType: nil,
+        windows: [window(10, minutes: 10080, resetsIn: 600)]))
     try reopened.commit()
     let again = try Database(url: url)
-    let kept = try again.fileStates(provider: "codex")
+    let kept = try again.latestReadings(provider: "codex")
     check(kept.count == 1, "reopening a current cache lost data")
+}
+
+test("Old caches are deleted; the current one and other files are kept") {
+    let dir = tmp.appendingPathComponent("caches")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let names = ["cache-v4.sqlite", "cache-v4.sqlite-wal", "cache-v4.sqlite-shm", "cache-v3.sqlite",
+                 "cache-v5.sqlite", "cache-v5.sqlite-wal", "accounts.json"]
+    for name in names { FileManager.default.createFile(atPath: dir.appendingPathComponent(name).path, contents: Data()) }
+    LegacyCleanup.removeOldCaches(current: dir.appendingPathComponent("cache-v5.sqlite"))
+    let left = Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+    check(left == ["cache-v5.sqlite", "cache-v5.sqlite-wal", "accounts.json"], "left: \(left.sorted())")
 }
 
 test("Database: a pass refuses to write if another build changed the schema") {
@@ -403,7 +319,7 @@ test("A window with no reset time goes stale once it is older than its own lengt
 
 test("A window with no reset time and no length is trusted for an hour") {
     let w = AllowanceWindow(usedPercent: 50, windowMinutes: nil, resetsAt: nil, limitId: nil)
-    let reading = AllowanceReading(recordedAt: now, source: .codexLog, planType: nil, windows: [w])
+    let reading = AllowanceReading(recordedAt: now, source: .chatgptWeb, planType: nil, windows: [w])
     check(!reading.liveWindows(now: now.addingTimeInterval(59 * 60)).isEmpty, "valid within the hour")
     check(reading.liveWindows(now: now.addingTimeInterval(3601)).isEmpty, "stale after an hour")
 }
@@ -468,19 +384,17 @@ test("chatgpt.com: primary/secondary windows keep their length and reset time") 
     check(windows["secondary"]?.windowMinutes == 300, "5-hour window wrong")
 }
 
-test("Source priority: a website wins, and each provider falls back in its own order") {
-    let webCodex = AllowanceReading(recordedAt: now.addingTimeInterval(-30), source: .chatgptWeb,
-                                    planType: nil, windows: [window(61, minutes: 10080, resetsIn: 8000)])
-    let logCodex = AllowanceReading(recordedAt: now, source: .codexLog, planType: "prolite",
-                                    windows: [window(55, minutes: 10080, resetsIn: 8000, limitId: "codex")])
-    let chosen = ReadingSelection.choose(provider: .codex, readings: [logCodex, webCodex], now: now)
-    check(chosen.map(\.source) == [.chatgptWeb], "chatgpt.com should win even over a newer log line")
-
-    // …but an hours-old website reading loses to the log.
-    let staleWeb = AllowanceReading(recordedAt: now.addingTimeInterval(-3600), source: .chatgptWeb,
-                                    planType: nil, windows: [window(61, minutes: 10080, resetsIn: 8000)])
-    check(ReadingSelection.choose(provider: .codex, readings: [logCodex, staleWeb], now: now)
-            .map(\.source) == [.codexLog], "a stale website reading should lose to the log")
+test("Source priority: a fresh claude.ai reading wins; a stale one loses to the status line") {
+    let web = AllowanceReading(recordedAt: now.addingTimeInterval(-30), source: .claudeWeb,
+                               planType: nil, windows: [window(61, minutes: 300, resetsIn: 8000)])
+    let status = AllowanceReading(recordedAt: now, source: .claudeStatusLine, planType: nil,
+                                  windows: [window(55, minutes: 300, resetsIn: 8000)])
+    check(ReadingSelection.choose(provider: .claude, readings: [status, web], now: now)
+            .map(\.source) == [.claudeWeb], "claude.ai should win even over a newer status line")
+    let staleWeb = AllowanceReading(recordedAt: now.addingTimeInterval(-3600), source: .claudeWeb,
+                                    planType: nil, windows: [window(61, minutes: 300, resetsIn: 8000)])
+    check(ReadingSelection.choose(provider: .claude, readings: [status, staleWeb], now: now)
+            .map(\.source) == [.claudeStatusLine], "a stale claude.ai reading should lose")
 }
 
 test("A website reading replaces that source's earlier set, not just same-named limits") {
@@ -498,14 +412,6 @@ test("A website reading replaces that source's earlier set, not just same-named 
     check(latest.count == 1, "expected one reading, got \(latest.count)")
     check(latest.first?.windows.count == 1 && latest.first?.windows.first?.windowMinutes == 10080,
           "the old row survived: \(String(describing: latest.first?.windows))")
-
-    // Log readings are not cleared this way.
-    try db.addReading(provider: "codex", AllowanceReading(
-        recordedAt: now, source: .codexLog, planType: nil,
-        windows: [window(55, minutes: 10080, resetsIn: 3600, limitId: "codex")]))
-    try db.deleteReadings(provider: "codex", source: .chatgptWeb)
-    let afterClear = try db.latestReadings(provider: "codex")
-    check(afterClear.map(\.source) == [.codexLog], "log readings should be untouched")
 }
 
 // MARK: - Result

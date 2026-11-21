@@ -74,7 +74,7 @@ editors can open the project.
 with every app source except the app's `main.swift`.
 
 **Only use made-up data in tests.** Never read real files from `~/.claude`,
-`~/.codex` or `~/Library/Application Support/AIUsageMeter`. The log files hold
+`~/.codex` or `~/Library/Application Support/AIUsageMeter`. The first two hold
 your conversations, and a test that reads your real readings passes or fails for
 the wrong reasons — that happened once, with `ClaudeReadings.load()` defaults.
 Always pass explicit temp paths.
@@ -123,9 +123,9 @@ What's covered today:
 | Fix a sign-in window or site script | `WebSession.swift` |
 | Fix website field mapping | `WebUsageSource.swift` (turn on `saveRawReplies`, see [docs/DATA-SOURCES.md](docs/DATA-SOURCES.md), then check `statusline/*-raw.json`) |
 | Change the cache schema | `Database.swift`: bump `schemaVersion` (the file name follows) |
-| Fix Codex numbers | `CodexParser.swift` |
 | Change which window is the big number | `Provider.headline` in `Models.swift` |
 | Change how often things refresh | `WebUsageSource.pollInterval`, the 30 s timer in `UsageStore`, `FileWatcher` debounce |
+| Fix Codex numbers | `WebUsageSource.swift` (the chatgpt.com reply) |
 | Change the app icon | `assets/app-icon.svg`, then `./scripts/make-app-icon.sh` |
 
 Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -134,14 +134,16 @@ Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 1. Add a case to `Provider` in `Models.swift`, with its display name and headline
    rule.
-2. Write a parser that follows `LogParser`.
+2. Read its usage from the provider's own signed-in website, the way
+   `WebSession` and `WebUsageSource` do for claude.ai and chatgpt.com. Don't read
+   its local logs: they hold conversations.
 3. Only produce an `AllowanceReading` if the provider itself reports a
    percentage (rule 1).
 4. Add it to the pass in `UsageIndex.refresh` and to `UsageReport`.
 5. Add a card in `UsagePanel.swift` and a logo in `assets/` (with attribution in
    `assets/README.md`).
 6. Document the format in [docs/DATA-SOURCES.md](docs/DATA-SOURCES.md).
-7. Add tests with made-up log lines.
+7. Add tests with made-up replies.
 
 ---
 

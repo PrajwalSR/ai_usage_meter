@@ -6,10 +6,8 @@ import Foundation
 /// because they mean different things:
 /// - `claudeStatusLine`: Claude Code handed it to a local script; the time is
 ///   when it was *received locally*, not when Anthropic produced it.
-/// - `codexLog`: the Codex CLI wrote it into a session log while running.
 enum ReadingSource: String, Sendable, Equatable, CaseIterable {
     case claudeStatusLine = "claude-statusline"
-    case codexLog = "codex-log"
     /// Read from claude.ai inside the app's own signed-in web view.
     case claudeWeb = "claude-web"
     /// Read from chatgpt.com inside the app's own signed-in web view.
@@ -92,7 +90,7 @@ enum Provider: String, Sendable, Equatable, Codable {
     var sourcePriority: [ReadingSource] {
         switch self {
         case .claude: return [.claudeWeb, .claudeStatusLine]
-        case .codex: return [.chatgptWeb, .codexLog]
+        case .codex: return [.chatgptWeb]
         }
     }
 
@@ -113,9 +111,8 @@ enum Provider: String, Sendable, Equatable, Codable {
 /// Picks which readings to show, from which source.
 ///
 /// Websites (claude.ai, chatgpt.com) can be asked every minute, so they lead.
-/// The others fill in when the website has nothing recent: api.anthropic.com is
-/// rate-limited, Codex's logs only change when Codex runs, and the status line
-/// only runs in a terminal.
+/// Claude's status line fills in when claude.ai has nothing recent: it only runs
+/// in a terminal. ChatGPT has only chatgpt.com.
 enum ReadingSelection {
     /// A reading this recent from a preferred source wins outright.
     static let freshness: TimeInterval = 15 * 60
@@ -159,10 +156,6 @@ struct ProviderReading: Sendable, Equatable {
     var readings: [AllowanceReading]
     /// Why there is no reading, shown when `readings` is empty.
     var unavailableNote: String
-    /// Log files seen for this provider, and how many had new bytes this pass.
-    /// Zero read means everything was already indexed.
-    var filesSeen: Int = 0
-    var filesReadThisPass: Int = 0
 
     var providerName: String { provider.displayName }
 
@@ -244,7 +237,6 @@ enum Fmt {
     static func sourceLine(_ r: AllowanceReading, now: Date) -> String {
         switch r.source {
         case .claudeStatusLine: return "From Claude Code status line · received \(age(r.recordedAt, now: now))"
-        case .codexLog: return "From Codex logs · recorded \(age(r.recordedAt, now: now))"
         case .claudeWeb: return "From claude.ai · \(age(r.recordedAt, now: now))"
         case .chatgptWeb: return "From chatgpt.com · \(age(r.recordedAt, now: now))"
         }

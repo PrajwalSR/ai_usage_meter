@@ -1,7 +1,7 @@
 import Foundation
 
-/// Watches log directories with FSEvents and reports changes after a quiet
-/// period, so a burst of writes during an active turn triggers one rescan.
+/// Watches the app's reading folder with FSEvents and reports changes after a
+/// quiet period, so a burst of writes triggers one rescan.
 final class FileWatcher {
     private var stream: FSEventStreamRef?
     private let queue = DispatchQueue(label: "io.github.prajwalsr.aiusagemeter.fsevents")
@@ -39,8 +39,6 @@ final class FileWatcher {
             FSEventStreamStart(stream)
         }
     }
-
-    var isWatching: Bool { stream != nil }
 
     private func schedule() {
         pending?.cancel()

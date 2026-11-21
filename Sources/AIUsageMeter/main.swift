@@ -48,9 +48,6 @@ if CommandLine.arguments.contains("--scan") {
             case .unavailable:
                 print("  usage unavailable: \(r.unavailableNote)")
             }
-            if r.filesSeen > 0 {
-                print("  files:   \(r.filesSeen) seen, \(r.filesReadThisPass) read this pass")
-            }
             print("")
         }
         for e in report.errors { print("! \(e)") }
@@ -140,7 +137,6 @@ final class AppController: NSObject, NSApplicationDelegate {
             model: PanelModel(
                 report: store.report,
                 isScanning: store.isScanning,
-                isWatching: store.isWatching,
                 showingSettings: store.showingSettings,
                 claudeSignedIn: store.claudeSignedIn,
                 chatGPTSignedIn: store.chatGPTSignedIn,
@@ -192,7 +188,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 }
 
-// One copy of the app at a time: two would index the same logs at once, and
+// One copy of the app at a time: two would update the same cache at once, and
 // `--rebuild` must not delete the cache under a running app. The lock is held
 // for the life of the process.
 guard let appLock = InstanceLock() else {

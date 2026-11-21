@@ -12,7 +12,6 @@ import ServiceManagement
 final class UsageStore {
     private(set) var report: UsageReport?
     private(set) var isScanning = false
-    private(set) var isWatching = false
     private(set) var indexError: String?
 
     var onChange: (() -> Void)?
@@ -49,6 +48,7 @@ final class UsageStore {
         indexError = LegacyCleanup.removeLegacyURLCache()
         LegacyCleanup.removeLegacyLiveReading()
         LegacyCleanup.removeRawReplies()
+        LegacyCleanup.removeOldCaches()
         LegacyCleanup.tightenPermissions()
         LegacyCleanup.migrateLegacyDefaults()
         WebSession.removeOrphanedStores(keeping: AccountRegistry.shared.accounts)
@@ -68,13 +68,11 @@ final class UsageStore {
         try? FileManager.default.createDirectory(at: ClaudeReadings.directory,
                                                  withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
-        // Claude Code's logs are deliberately not watched: the app doesn't count
-        // tokens, so it never reads your conversations.
-        watcher = FileWatcher(paths: [CodexParser.root.path,
-                                      ClaudeReadings.directory.path]) { [weak self] in
+        // Only the app's own reading files are watched. No log is read, Claude
+        // Code's or Codex's, so the app never sees your conversations.
+        watcher = FileWatcher(paths: [ClaudeReadings.directory.path]) { [weak self] in
             Task { @MainActor in self?.refresh() }
         }
-        isWatching = watcher?.isWatching ?? false
 
         scheduleWebChecks()
         fetchAllWebUsage()
@@ -146,7 +144,8 @@ final class UsageStore {
 
     /// Whether the user has asked for this website at all. Until they click
     /// Sign in, the site is never loaded: nothing goes online unasked, and
-    /// someone relying on Codex's logs alone isn't nagged with "Not signed in".
+    /// someone relying on the Claude status line alone isn't nagged with "Not
+    /// signed in".
     /// A reading already on disk counts, so earlier installs keep working.
     func isEnabled(_ provider: WebProvider) -> Bool {
         UserDefaults.standard.bool(forKey: Self.enabledKey(provider))
@@ -251,10 +250,10 @@ final class UsageStore {
         for account in accounts {
             let provider = WebProvider.forAccount(account)
             let reading = ClaudeReadings.read(provider.readingURL, source: provider.source)
-            // The original accounts also have the backups (Codex's logs, the
-            // status line). The scan already holds the website reading next to
-            // them, and the freshest wins at display time, so a website that
-            // stopped answering can't pin an old number in place.
+            // The original Claude account also has the status line as a backup.
+            // The scan already holds the website reading next to it, and the
+            // freshest wins at display time, so a website that stopped answering
+            // can't pin an old number in place.
             if AccountRegistry.isLegacy(account),
                let all = account.provider == .claude ? report?.claude : report?.codex {
                 result[account.id] = all

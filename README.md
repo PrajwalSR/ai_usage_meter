@@ -78,11 +78,11 @@ own.
 `./scripts/render-screenshots.sh`.)*
 
 Every number shows **where it came from** and **how old it is**, like "From
-claude.ai · 30s ago" or "From Codex logs · recorded 50m ago". The panel uses the
+claude.ai · 30s ago" or "From chatgpt.com · 2m ago". The panel uses the
 same colors as the menu bar.
 
 The app shows limits only. It does **not** count tokens, and it never reads your
-Claude Code conversations.
+Claude Code or Codex conversations.
 
 ---
 
@@ -92,7 +92,6 @@ Claude Code conversations.
 flowchart LR
     A["claude.ai<br/>(signed in inside the app)"] -->|"every minute"| M["AI Usage Meter<br/>on your Mac"]
     G["chatgpt.com<br/>(signed in inside the app)"] -->|"every minute"| M
-    B["Codex log files<br/>on your Mac"] -->|"backup"| M
     M --> C["Menu bar"]
 ```
 
@@ -110,10 +109,10 @@ There's no server and no extra account. It all runs on your Mac.
 | Claude | **claude.ai** | Every minute | Signing in once, in the app's own window |
 | Claude | [Claude Code status line](#claude-without-signing-in) (backup) | Only while Claude Code runs in Terminal | A line in your Claude Code settings |
 | ChatGPT | **chatgpt.com** | Every minute | Signing in once, in the app's own window |
-| ChatGPT | Codex log files (backup) | Only when Codex runs on this Mac | Nothing: Codex writes them anyway |
 
-A backup is only used when the main source has nothing recent. Signing in is
-optional for ChatGPT: without it, the app still works from Codex's logs.
+The backup is only used when claude.ai has nothing recent. ChatGPT has no
+backup: sign in to see its usage. The app never reads Codex's files in
+`~/.codex`.
 
 The app never reads anything from your Keychain, so macOS never asks for Keychain
 access.
@@ -218,7 +217,6 @@ To undo it, delete the `"statusLine"` part from `~/.claude/settings.json`.
 flowchart TB
     subgraph Mac["Your Mac"]
         W["Sign-in windows<br/>(the app's own browser)"] -->|"asks from inside<br/>the signed-in page"| APP["AI Usage Meter"]
-        L["Codex log files"] -->|"reads limit lines only"| APP
     end
     APP -->|"usage only"| AN["claude.ai<br/>chatgpt.com"]
     APP -.->|"never"| X["Any other website<br/>analytics or tracking"]
@@ -230,7 +228,7 @@ flowchart TB
 | Where do my sessions live? | In the app's own browser storage, like any browser. **The app never reads or copies them**: it asks for usage *from inside* the signed-in page, so the page attaches its own cookie. Other apps of this kind lift the cookie out of Safari's or Chrome's cookie database; this one doesn't. |
 | Does it touch my Keychain? | No. It never reads the Keychain, including Claude Code's saved login. |
 | Does it contact the internet? | Only claude.ai and chatgpt.com, about once a minute per signed-in account, for usage. Nothing else, ever. |
-| Does it read my chats? | **It never opens Claude Code's logs.** It reads Codex's logs, which do hold your Codex conversations, but only looks at lines carrying the limit numbers and saves only those. |
+| Does it read my chats? | **No.** It never opens Claude Code's or Codex's logs, which hold your conversations. |
 | Does it track me? | No. No analytics, no tracking, no crash reports. |
 | How do I sign out? | ⚙ → **Accounts** → **Sign out** on that account. It erases that account's cookies and site data; **Remove** (the bin) also drops the account. |
 
@@ -248,10 +246,6 @@ chatgpt.com have their own limits, which aren't shown here.
 Claude's limit is shared by claude.ai, the phone app, the desktop app and Claude
 Code; the Codex limit is shared across machines. Signed in, this Mac shows use from
 anywhere within a minute.
-
-**Without the ChatGPT sign-in, that number only updates when Codex runs here.**
-Codex writes its limit to log files on this Mac only while it runs. The card
-always shows how old the number is.
 
 **It never guesses.**
 The app shows only percentages Anthropic or OpenAI reported. It doesn't count
@@ -276,7 +270,7 @@ app drops it rather than show a stale 0%.
 | "Continue with Google" shows "This browser or app may not be secure" | Google refused this window. Use the email option. |
 | An account shows **Sign in** again, or `⚠︎` in the menu bar | That site's session expired or it stopped answering. Click **Sign in** and sign in once more. |
 | Claude says "Usage unavailable" | Sign in to Claude under ⚙ → Accounts, or set up [the status line](#claude-without-signing-in). |
-| ChatGPT number is old, or shows `?` | Sign in to ChatGPT under ⚙ → Accounts, or use Codex once and it updates. |
+| ChatGPT number is old, or shows `?` | Sign in to ChatGPT again under ⚙ → Accounts. |
 | Claude's 5-hour row is missing | The last reading is older than 5 hours, so it can't be trusted. It returns at the next successful check. |
 | Numbers are a bit different from another app | Compare how old each number is. Numbers taken minutes apart differ. |
 | Doesn't open at login after moving the app | Turn **Open at login** off and on again. |

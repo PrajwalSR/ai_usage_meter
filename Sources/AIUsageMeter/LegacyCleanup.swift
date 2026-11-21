@@ -40,6 +40,19 @@ enum LegacyCleanup {
         }
     }
 
+    /// Caches from earlier schema versions. Up to v4 they also recorded the path
+    /// of every Codex log read, which includes project folder names. Only the
+    /// current version's file (and its -wal / -shm) is kept.
+    static func removeOldCaches(current: URL = Database.defaultURL) {
+        let fm = FileManager.default
+        let dir = current.deletingLastPathComponent()
+        let keep = current.lastPathComponent
+        for name in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+        where name.hasPrefix("cache") && name.contains(".sqlite") && !name.hasPrefix(keep) {
+            try? fm.removeItem(at: dir.appendingPathComponent(name))
+        }
+    }
+
     /// Earlier builds created files readable by other users (0644) and the
     /// readings folder as 0755. Only the outer folder's 0700 protected them;
     /// now each file is owner-only as well.

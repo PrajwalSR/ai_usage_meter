@@ -49,7 +49,7 @@ enum WebUsageSource {
         var payload: [String: Any] = ["received_at": now.timeIntervalSince1970,
                                       "rate_limits": rateLimits]
         // chatgpt.com names the plan ("plus", "prolite") next to the limits;
-        // keep it so the card can show it, as it does for Codex's logs.
+        // keep it so the card can show it.
         if let plan = (usage as? [String: Any])?["plan_type"] as? String, !plan.isEmpty {
             payload["plan_type"] = plan
         } else if let plan = claudePlan(top["plan"] as? [String: Any]) {

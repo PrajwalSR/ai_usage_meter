@@ -12,12 +12,10 @@ flowchart LR
     subgraph Undocumented["Undocumented (may change)"]
         CW["claude.ai usage endpoint"]
         GW["chatgpt.com usage endpoint"]
-        CXL["Codex session logs"]
     end
     CW -->|"Claude %"| M["AI Usage Meter"]
     SL -->|"Claude %, backup"| M
     GW -->|"Codex %"| M
-    CXL -->|"Codex %, backup"| M
 ```
 
 | Source | Documented? | Needs a login | Network | Used for |
@@ -25,12 +23,13 @@ flowchart LR
 | claude.ai `/api/organizations/{id}/usage` | **No** | claude.ai sign-in, in the app's window | Yes | Claude % (the normal source) |
 | Claude Code status line `rate_limits` | **Yes** | No | No | Claude %, backup |
 | chatgpt.com `/backend-api/wham/usage` | **No** | chatgpt.com sign-in, in the app's window | Yes | Codex % (the normal source) |
-| Codex session logs `rate_limits` | No, internal log format | No | No | Codex %, backup |
 
-The app does **not** read Claude Code's session logs, count tokens, or read the
-Keychain.
+The app does **not** read Claude Code's or Codex's session logs, count tokens, or
+read the Keychain. ChatGPT has no backup source: without the chatgpt.com sign-in
+its card says "unavailable". (Version 0.1 also read Codex's logs in
+`~/.codex/sessions` as a backup; that was removed.)
 
-Observed with Claude Code 2.1.231–2.1.270 and Codex CLI logs from September 2026.
+Observed with Claude Code 2.1.231–2.1.270 in September 2026.
 
 ---
 
@@ -123,7 +122,7 @@ Relevant part of the reply, keys and types only (values invented):
 What the parser does with it (`WebUsageSource`, same code as claude.ai):
 
 - Windows are named by **rank** (`primary_window`, `secondary_window`), not by
-  length, just like the Codex logs. The length comes from `limit_window_seconds`;
+  length. The length comes from `limit_window_seconds`;
   the rank is never shown as a limit name.
 - `reset_at` (epoch seconds) is preferred; `reset_after_seconds` (seconds from
   now) is the fallback.
@@ -139,11 +138,10 @@ What the parser does with it (`WebUsageSource`, same code as claude.ai):
 - The reading is saved to `statusline/codex-web.json`. It holds neither the token
   nor a cookie. The raw reply is saved only with `saveRawReplies` on (see above).
 
-### How the Codex sources are combined
+### Only one Codex source
 
-Same rule as Claude: a chatgpt.com reading under 15 minutes old with a valid
-window wins, even over a newer log line; otherwise the newest valid reading wins.
-See `ReadingSelection.choose`.
+chatgpt.com is the only source for Codex. A reading whose windows have all reset
+is shown as "unknown" until the next check. See `ReadingSelection.choose`.
 
 ## Removed: Anthropic usage endpoint
 
@@ -201,47 +199,10 @@ claude.ai wins if it is under 15 minutes old, then whichever is newest. If none 
 stale stops winning without a rescan. See `ClaudeReadings.choose` and
 [ARCHITECTURE.md](ARCHITECTURE.md#claude-two-sources-one-choice).
 
-## Codex session logs
+## ChatGPT plan names
 
-Location: `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<id>.jsonl`, one JSON
-object per line.
-
-### Rate limits
-
-On `event_msg` lines whose `payload.type` is `token_count`:
-
-```json
-{
-  "timestamp": "2026-09-16T15:00:32.185Z",
-  "type": "event_msg",
-  "payload": {
-    "type": "token_count",
-    "info": { "…": "…" },
-    "rate_limits": {
-      "limit_id": "codex",
-      "primary":   { "used_percent": 54.0, "window_minutes": 10080, "resets_at": 1789824395 },
-      "secondary": null,
-      "credits":   { "has_credits": false, "unlimited": false, "balance": "0" },
-      "plan_type": "prolite"
-    }
-  }
-}
-```
-
-Pitfalls seen in real data:
-
-- **`primary` isn't always the short window.** It has been observed as a 7-day
-  (`10080`) window with `secondary: null`. Always read `window_minutes`; never
-  infer the duration from the key.
-- **`plan_type` changes over time** for the same account (`plus` and later
-  `prolite`). It reflects the plan when the line was written.
-- The line's top-level `timestamp` is the reading's `recordedAt`.
-- **Every window is kept**, each tagged with the block's `limit_id`. The cache
-  stores the newest reading **per limit id**, so a newer reading for one limit
-  never hides another limit that is still valid. The card's big number is the
-  valid window closest to its limit, across all limits. If `limit_id` is anything
-  other than `codex`, it's shown next to the window name.
-- `window_minutes` is read as a number of any type (integer or floating point).
+chatgpt.com reports the plan as an internal id next to the limits. It can change
+over time for the same account (`plus`, later `prolite`).
 
 Known `plan_type` values and display names (`UsagePanel.planLabel`):
 
@@ -256,18 +217,8 @@ Known `plan_type` values and display names (`UsagePanel.planLabel`):
 ## When a format changes
 
 1. Run `./build/AIUsageMeter --scan` and see which provider or field is wrong.
-2. Look at the **structure** of a recent line: key names and value types, never
-   the values. These files hold your conversations, so don't paste real content
-   anywhere:
-   ```bash
-   f=$(ls -t ~/.codex/sessions/*/*/*/*.jsonl | head -1)
-   grep -m1 rate_limits "$f" | python3 -c '
-   import json, sys
-   def shape(v):
-       if isinstance(v, dict): return {k: shape(x) for k, x in v.items()}
-       if isinstance(v, list): return [shape(v[0])] if v else []
-       return type(v).__name__
-   print(json.dumps(shape(json.load(sys.stdin)["payload"]["rate_limits"]), indent=1))'
-   ```
-   It prints something like `"used_percent": "float"`, with no actual numbers.
-3. Update the parser and this document together.
+2. Turn on `saveRawReplies` (see above), refresh, and look at the **structure** of
+   `statusline/*-raw.json`: key names and value types. Don't paste real values
+   anywhere; the email and account ids are already removed from those files.
+3. Turn `saveRawReplies` off again, which deletes the raw files at next launch.
+4. Update `WebUsageSource` and this document together.

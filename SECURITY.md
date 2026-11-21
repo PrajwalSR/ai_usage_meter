@@ -1,8 +1,8 @@
 # Security
 
-This app is close to private stuff: Codex's logs and signed-in claude.ai and
-chatgpt.com sessions.
-It does **not** read Claude Code's logs or your Claude Code login at all. This page explains what it touches, why, and
+This app is close to private stuff: your signed-in claude.ai and chatgpt.com
+sessions.
+It does **not** read Claude Code's or Codex's logs, or either one's login. This page explains what it touches, why, and
 how it keeps things safe. It also lists what it **can't** promise.
 
 ---
@@ -23,7 +23,6 @@ it. Please give reasonable time for a fix before sharing it publicly.
 flowchart TB
     subgraph Mac["Your Mac"]
         direction TB
-        C2["Codex logs<br/>~/.codex/sessions"] -->|"read: limit lines only"| APP
         SL["Status line file<br/>(optional script)"] -->|"read"| APP
         WV["The app's own browser<br/>(your claude.ai and chatgpt.com sessions)"] -->|"asks from inside<br/>the signed-in page"| APP
         APP["AI Usage Meter"] -->|"saves numbers only"| S["~/Library/Application Support/AIUsageMeter<br/>(only your user can open it)"]
@@ -33,8 +32,8 @@ flowchart TB
 
 | Thing | What the app does | When |
 |---|---|---|
-| Codex logs `~/.codex/sessions` | Reads lines carrying `rate_limits` | Always |
 | Claude Code logs `~/.claude/projects` | **Never opened** | — |
+| Codex's folder `~/.codex` (logs and login) | **Never opened** | — |
 | `https://claude.ai/api/organizations…` | Sends a request from inside the signed-in page | About once a minute, only after you click **Sign in** for Claude |
 | `https://chatgpt.com/api/auth/session`, `/backend-api/wham/usage`, `/backend-api/wham/rate-limit-reset-credits` | Sends requests from inside the signed-in page | About once a minute, only after you click **Sign in** for ChatGPT |
 | Session cookies for both sites | **Never reads them.** They stay in the app's browser storage, which attaches them automatically | — |
@@ -43,13 +42,14 @@ flowchart TB
 | `~/Library/Application Support/AIUsageMeter/` | Reads and writes | Always. Folder mode `0700`. Holds the cache, reading files and `instance.lock` |
 | `~/Library/Caches/local.aiusagemeter/` | **Deletes** | At launch, if present. It's the request cache left by early builds (see Past issues) |
 | `statusline/claude-live.json` | **Deletes** | At launch, if present. Left by earlier builds' removed backup check |
+| Older caches `cache-v1.sqlite` to `cache-v4.sqlite` | **Deletes** | At launch, if present. Builds up to 0.1 recorded the paths of the Codex logs they read there |
 
 ### What the app never does
 
 - ❌ See your password: you type it on the provider's own page
 - ❌ Read, copy or store a session cookie or access token
 - ❌ Read cookies from Safari, Chrome or any other browser
-- ❌ Open your OpenAI login (`~/.codex/auth.json`)
+- ❌ Open anything in `~/.codex`, including your OpenAI login (`auth.json`)
 - ❌ Read anything from the Keychain
 - ❌ Contact any website except `claude.ai` and `chatgpt.com`, and those only after you sign in
 - ❌ Run commands or start other programs
@@ -128,24 +128,19 @@ Why it is built this way:
 
 ## Your chats
 
-**Claude Code's logs are never opened.** The app doesn't count tokens, so it has
-no reason to read them.
-
-Codex's logs do hold your Codex conversations, and the app reads them like this:
-
-1. Each line is scanned for the bytes `rate_limits`.
-2. Lines without it are skipped without being decoded.
-3. A line with it is decoded in memory, the limit numbers are copied out, and the
-   rest is dropped.
+**Claude Code's and Codex's logs are never opened.** They hold your
+conversations, and the app gets every number from the websites (or the optional
+Claude status line), so it has no reason to read them.
 
 | Saved | Never saved |
 |---|---|
 | Limit percentages, reset times, plan name | Messages, prompts, answers |
-| Codex log paths and how far each was read | Code, token counts |
+| | Code, token counts, file paths |
 | | Logins and cookies |
 
-File paths show your project folder names, which is why the app's folder is only
-readable by your Mac user.
+Version 0.1 did read Codex's logs, as a backup, looking only at lines carrying
+`rate_limits`. Later versions removed that, and delete the old cache that listed
+those log paths.
 
 ---
 
@@ -198,5 +193,7 @@ login. Logins also expire on their own.
 - [ ] The app never reads the cookie itself:
       `grep -rn "HTTPCookie\|cookieStore\|binarycookies" Sources/` finds nothing
 - [ ] `debug.log` records events only — no cookies, tokens or page content
+- [ ] Nothing reads `~/.codex` or `~/.claude/projects`:
+      `grep -rn '\.codex/\|"\.codex"\|\.claude/projects' Sources/` finds nothing
 - [ ] `./scripts/run-tests.sh` passes
 - [ ] `git status` shows no databases, `.jsonl` logs, `auth.json` or `build/` files

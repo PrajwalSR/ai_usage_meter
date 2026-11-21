@@ -7,7 +7,6 @@ import AppKit
 struct PanelModel {
     var report: UsageReport?
     var isScanning: Bool
-    var isWatching: Bool
     var showingSettings: Bool
     var claudeSignedIn: Bool
     var chatGPTSignedIn: Bool
@@ -271,11 +270,7 @@ struct SettingsPage: View {
 
             Divider()
 
-            HStack(spacing: 5) {
-                Circle().fill(model.isWatching ? Color.green : Color.orange)
-                    .frame(width: 6, height: 6)
-                Text(model.isWatching ? "Codex log backup on" : "Codex log backup unavailable")
-                    .font(.caption2).foregroundStyle(.secondary)
+            HStack {
                 Spacer()
                 Button("Quit", action: actions.quit).buttonStyle(.borderless).font(.caption)
             }
@@ -579,7 +574,7 @@ struct ProviderCard: View {
 
     /// Badge next to the provider name.
     ///
-    /// Codex logs give an internal id (`prolite` = ChatGPT Pro 5x). claude.ai
+    /// chatgpt.com gives an internal id (`prolite` = ChatGPT Pro 5x). claude.ai
     /// names the plan on the signed-in organization. Claude's status line has
     /// no plan, so a fixed label can be set for that case only; the website's
     /// plan always wins over it:
@@ -743,7 +738,6 @@ struct ProviderCard: View {
         let base = "The last reading's limit has reset since it was taken, so the current "
                  + "figure isn't known yet. "
         switch source {
-        case .codexLog: return base + "It updates the next time Codex runs."
         case .claudeStatusLine: return base + "It updates the next time Claude Code runs in a terminal."
         case .claudeWeb: return base + "It updates at the next check with claude.ai."
         case .chatgptWeb: return base + "It updates at the next check with chatgpt.com."
